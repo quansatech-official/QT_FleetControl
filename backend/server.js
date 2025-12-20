@@ -12,6 +12,8 @@ app.use(cors());
 app.use(express.json());
 
 const pool = createPoolFromEnv();
+const tablePrefix = process.env.DB_PREFIX || "";
+const tbl = (name) => `${tablePrefix}${name}`;
 
 /* =======================
    Konfiguration (ENV)
@@ -40,7 +42,7 @@ app.get("/api/health", (_req, res) => {
 app.get("/api/devices", async (_req, res) => {
   try {
     const [rows] = await pool.query(
-      "SELECT id, name, uniqueid FROM devices WHERE disabled = 0 ORDER BY name"
+      `SELECT id, name, uniqueid FROM ${tbl("devices")} WHERE disabled = 0 ORDER BY name`
     );
     res.json(rows);
   } catch (err) {
@@ -66,7 +68,7 @@ app.get("/api/activity/month", async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT fixtime, speed
-       FROM positions
+       FROM ${tbl("positions")}
        WHERE deviceid = ? AND fixtime >= ? AND fixtime < ?
        ORDER BY fixtime ASC`,
       [deviceId, start.toDate(), end.toDate()]
@@ -109,7 +111,7 @@ app.get("/api/fuel/month", async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT fixtime, attributes
-       FROM positions
+       FROM ${tbl("positions")}
        WHERE deviceid = ? AND fixtime >= ? AND fixtime < ?
        ORDER BY fixtime ASC`,
       [deviceId, start.toDate(), end.toDate()]
@@ -161,13 +163,13 @@ app.get("/api/reports/activity.pdf", async (req, res) => {
     const end = start.add(1, "month");
 
     const [[device]] = await pool.query(
-      "SELECT id, name FROM devices WHERE id = ?",
+      `SELECT id, name FROM ${tbl("devices")} WHERE id = ?`,
       [deviceId]
     );
 
     const [rows] = await pool.query(
       `SELECT fixtime, speed
-       FROM positions
+       FROM ${tbl("positions")}
        WHERE deviceid = ? AND fixtime >= ? AND fixtime < ?
        ORDER BY fixtime ASC`,
       [deviceId, start.toDate(), end.toDate()]
