@@ -1,0 +1,18 @@
+{
+  "name": "qt-fleetcontrol-frontend",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.12.7",
+    "dayjs": "^1.11.11"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.10"
+  },
+  "scripts": {
+    "build": "vite build"
+  }
+}

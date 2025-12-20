@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  qt-api:
+    build: ./backend
+    container_name: qt-fleetcontrol-api
+    env_file: .env
+    ports:
+      - "3000:3000"
+    networks:
+      - fleet-net
+
+  qt-frontend:
+    build: ./frontend
+    container_name: qt-fleetcontrol-frontend
+    env_file: .env
+    ports:
+      - "8080:80"
+    networks:
+      - fleet-net
+
+networks:
+  fleet-net:
+    external: true
