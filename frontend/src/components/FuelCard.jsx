@@ -1,3 +1,5 @@
+import React from "react";
+
 export default function FuelCard({ fuel }) {
   return (
     <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
