@@ -5,25 +5,35 @@ function splitBlockByDay(start, end) {
   let cur = start;
 
   while (cur.isBefore(end)) {
+    const dayStart = cur.startOf("day");
     const next = cur.endOf("day").add(1, "ms");
     const stop = next.isBefore(end) ? next : end;
-    out.push({ day: cur.format("YYYY-MM-DD"), seconds: stop.diff(cur, "second") });
+    out.push({
+      day: cur.format("YYYY-MM-DD"),
+      seconds: stop.diff(cur, "second"),
+      startSec: cur.diff(dayStart, "second"),
+      endSec: stop.diff(dayStart, "second"),
+    });
     cur = stop;
   }
   return out;
 }
 
-export function computeDailyActiveSeconds(rows, cfg) {
+export function computeDailyActivity(rows, cfg) {
   let blockStart = null;
   let lastMove = null;
-  const daily = new Map();
+  const secondsByDay = new Map();
+  const segmentsByDay = new Map();
 
   const flush = () => {
     if (!blockStart || !lastMove) return;
     const dur = dayjs(lastMove).diff(dayjs(blockStart), "second");
     if (dur >= cfg.minMovingSeconds) {
       for (const p of splitBlockByDay(dayjs(blockStart), dayjs(lastMove))) {
-        daily.set(p.day, (daily.get(p.day) || 0) + p.seconds);
+        secondsByDay.set(p.day, (secondsByDay.get(p.day) || 0) + p.seconds);
+        const list = segmentsByDay.get(p.day) || [];
+        list.push({ start: p.startSec, end: p.endSec });
+        segmentsByDay.set(p.day, list);
       }
     }
     blockStart = null;
@@ -40,5 +50,5 @@ export function computeDailyActiveSeconds(rows, cfg) {
     }
   }
   flush();
-  return daily;
+  return { secondsByDay, segmentsByDay };
 }

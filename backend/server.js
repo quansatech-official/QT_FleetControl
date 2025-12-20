@@ -3,7 +3,7 @@ import cors from "cors";
 import dayjs from "dayjs";
 
 import { createPoolFromEnv } from "./db.js";
-import { computeDailyActiveSeconds } from "./activity.js";
+import { computeDailyActivity } from "./activity.js";
 import { extractFuelValue, detectFuelDrops } from "./fuel.js";
 import { renderPdfFromHtml } from "./pdf.js";
 
@@ -74,16 +74,18 @@ app.get("/api/activity/month", async (req, res) => {
       [deviceId, start.toDate(), end.toDate()]
     );
 
-    const dailyMap = computeDailyActiveSeconds(rows, cfg);
+    const { secondsByDay, segmentsByDay } = computeDailyActivity(rows, cfg);
 
     // Alle Tage des Monats auffüllen
     const daysInMonth = end.subtract(1, "day").date();
     const days = [];
     for (let d = 1; d <= daysInMonth; d++) {
       const day = start.date(d).format("YYYY-MM-DD");
+      const segments = segmentsByDay.get(day) || [];
       days.push({
         day,
-        activeSeconds: dailyMap.get(day) || 0
+        activeSeconds: secondsByDay.get(day) || 0,
+        segments
       });
     }
 
@@ -175,7 +177,7 @@ app.get("/api/reports/activity.pdf", async (req, res) => {
       [deviceId, start.toDate(), end.toDate()]
     );
 
-    const dailyMap = computeDailyActiveSeconds(rows, cfg);
+    const { secondsByDay } = computeDailyActivity(rows, cfg);
 
     const daysInMonth = end.subtract(1, "day").date();
     let totalSeconds = 0;
@@ -183,7 +185,7 @@ app.get("/api/reports/activity.pdf", async (req, res) => {
 
     for (let d = 1; d <= daysInMonth; d++) {
       const day = start.date(d).format("YYYY-MM-DD");
-      const sec = dailyMap.get(day) || 0;
+      const sec = secondsByDay.get(day) || 0;
       totalSeconds += sec;
       const hours = (sec / 3600).toFixed(2);
       rowsHtml += `<tr><td>${day}</td><td style="text-align:right">${hours}</td></tr>`;
