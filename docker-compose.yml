@@ -8,7 +8,7 @@ services:
     ports:
       - "3000:3000"
     networks:
-      - fleet-net
+      - traccar-01_default
 
   qt-frontend:
     build: ./frontend
@@ -17,8 +17,4 @@ services:
     ports:
       - "8080:80"
     networks:
-      - fleet-net
-
-networks:
-  fleet-net:
-    external: true
+      - traccar-01_default
