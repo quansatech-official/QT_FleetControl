@@ -21,16 +21,32 @@ const tbl = (name) => `${tablePrefix}${name}`;
 /* =======================
    Konfiguration (ENV)
    ======================= */
+const defaultFuelKeys = [
+  "fuel",
+  "fuel.level",
+  "fuelLevel",
+  "fuelUsed",
+  "fuelConsumption",
+  "io48",
+  "io[48]",
+  "attributes.io48",
+  "attributes['io48']",
+];
+
 const cfg = {
   minSpeedKmh: Number(process.env.MIN_SPEED_KMH || 5),
   stopToleranceSec: Number(process.env.STOP_TOLERANCE_SEC || 120),
   minMovingSeconds: Number(process.env.MIN_MOVING_SECONDS || 60),
   detailGapSeconds: Number(process.env.DETAIL_GAP_SECONDS || 600), // Segmente enger als dieser Wert werden im Detailreport zusammengelegt
 
-  fuelKeys: (process.env.FUEL_JSON_KEY || "fuel,fuel.level,fuelLevel,fuelUsed,fuelConsumption,io48,io[48],attributes.io48,attributes['io48']")
-    .split(",")
-    .map((k) => k.trim())
-    .filter(Boolean),
+  fuelKeys: Array.from(
+    new Set(
+      ((process.env.FUEL_JSON_KEY || "").split(",") || [])
+        .map((k) => k.trim())
+        .filter(Boolean)
+        .concat(defaultFuelKeys)
+    )
+  ),
   fuelDropLiters: Number(process.env.FUEL_DROP_LITERS || 10),
   fuelDropPercent: Number(process.env.FUEL_DROP_PERCENT || 8),
   fuelWindowMinutes: Number(process.env.FUEL_WINDOW_MINUTES || 10),
@@ -298,9 +314,17 @@ app.get("/api/fleet/status", async (_req, res) => {
     const devices = [];
 
     for (const r of rows) {
+      let attrsObj = null;
+      try {
+        const raw = Buffer.isBuffer(r.attributes) ? r.attributes.toString("utf8") : r.attributes;
+        attrsObj = typeof raw === "string" ? JSON.parse(raw) : raw;
+      } catch {
+        attrsObj = null;
+      }
+
       let fuel = null;
       try {
-        fuel = extractFuelValue(r.attributes, cfg.fuelKeys);
+        fuel = extractFuelValue(attrsObj ?? r.attributes, cfg.fuelKeys);
       } catch {
         fuel = null;
       }
@@ -345,7 +369,8 @@ app.get("/api/fleet/status", async (_req, res) => {
         speed: Number(r.speed || 0),
         fuel,
         fuelAlert,
-        fuelError: fuel === null
+        fuelError: fuel === null,
+        vin: attrsObj?.vin || attrsObj?.VIN || attrsObj?.vehicleVin || null
       });
     }
 

@@ -115,7 +115,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (mode === "overview" || mode === "export") {
+    if (mode === "overview" || mode === "export" || mode === "controlling") {
       refreshStatus();
     }
   }, [mode]);
@@ -276,6 +276,7 @@ export default function Dashboard() {
           activity={activity}
           fuel={fuel}
           deviceName={filteredDevices.find((d) => d.id === deviceId)?.name || ""}
+          vin={fleetStatus.find((d) => d.deviceId === deviceId)?.vin || null}
         />
       )}
 
@@ -359,6 +360,7 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
                 <th style={{ padding: 6 }}>Tage aktiv</th>
                 <th style={{ padding: 6 }}>Letzte Meldung</th>
                 <th style={{ padding: 6 }}>Ort</th>
+                <th style={{ padding: 6 }}>VIN</th>
               </tr>
             </thead>
             <tbody>
@@ -392,6 +394,7 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
                         ? `${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`
                         : "–")}
                   </td>
+                  <td style={{ padding: 6 }}>{d.vin || "–"}</td>
                 </tr>
               ))}
             </tbody>
@@ -409,7 +412,8 @@ function ControllingView({
   month,
   activity,
   fuel,
-  deviceName
+  deviceName,
+  vin
 }) {
   const [showDebug, setShowDebug] = useState(false);
   const [debugRows, setDebugRows] = useState([]);
@@ -482,6 +486,7 @@ function ControllingView({
             label="Tank-Alarme"
             value={fuel?.alerts?.length || 0}
           />
+          {vin ? <MetricCard label="VIN" value={vin} /> : null}
         </div>
       </div>
 
@@ -624,6 +629,9 @@ function ExportView({
                   {(d.activeSeconds / 3600).toFixed(1)} h
                 </span>
               </div>
+              {d.vin ? (
+                <div style={{ marginLeft: 32, fontSize: 12, color: "#475569" }}>VIN: {d.vin}</div>
+              ) : null}
             </label>
           ))}
           {!fleetDevices.length && <div style={{ color: "#666", fontSize: 12 }}>Keine Fahrzeuge</div>}
