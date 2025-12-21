@@ -438,8 +438,18 @@ function ControllingView({
 
         {/* Side cards */}
         <div style={{ display: "grid", gap: 16 }}>
-          <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
-            <h3 style={{ marginTop: 0 }}>Tankverlauf</h3>
+          <div
+            style={{
+              border: "1px solid #eee",
+              borderRadius: 12,
+              padding: "8px 12px",
+              height: 170,
+              display: "grid",
+              gridTemplateRows: "auto 1fr",
+              gap: 6
+            }}
+          >
+            <h3 style={{ margin: 0 }}>Tankverlauf</h3>
             <FuelHistoryChart series={fuel?.series || []} />
           </div>
           <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>

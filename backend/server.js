@@ -38,6 +38,7 @@ const cfg = {
   stopToleranceSec: Number(process.env.STOP_TOLERANCE_SEC || 120),
   minMovingSeconds: Number(process.env.MIN_MOVING_SECONDS || 60),
   detailGapSeconds: Number(process.env.DETAIL_GAP_SECONDS || 600), // Segmente enger als dieser Wert werden im Detailreport zusammengelegt
+  distanceMaxSpeedKmh: Number(process.env.DIST_MAX_SPEED_KMH || 160),
 
   fuelKeys: Array.from(
     new Set(
@@ -531,9 +532,17 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       : "-";
 
     // Distanz pro Tag (ungefähr, Haversine zwischen Positionspunkten)
+    // Filtert unrealistische GPS-Sprünge per Max-Geschwindigkeit.
     let dayDistance = 0;
     for (let i = 1; i < dayRows.length; i++) {
-      dayDistance += distanceKm(dayRows[i - 1], dayRows[i]);
+      const prev = dayRows[i - 1];
+      const cur = dayRows[i];
+      const deltaKm = distanceKm(prev, cur);
+      const deltaSec = Math.max(0, dayjs(cur.fixtime).diff(dayjs(prev.fixtime), "second"));
+      if (!deltaSec) continue;
+      const speedKmh = (deltaKm / deltaSec) * 3600;
+      if (speedKmh > cfg.distanceMaxSpeedKmh) continue;
+      dayDistance += deltaKm;
     }
     totalDistanceKm += dayDistance;
 
