@@ -6,6 +6,7 @@ import MonthPicker from "../components/MonthPicker.jsx";
 import ActivityBarChart from "../components/ActivityBarChart.jsx";
 import FuelCard from "../components/FuelCard.jsx";
 import AlertsCard from "../components/AlertsCard.jsx";
+import FuelHistoryChart from "../components/FuelHistoryChart.jsx";
 
 export default function Dashboard() {
   /* =====================
@@ -276,7 +277,6 @@ export default function Dashboard() {
           activity={activity}
           fuel={fuel}
           deviceName={filteredDevices.find((d) => d.id === deviceId)?.name || ""}
-          vin={fleetStatus.find((d) => d.deviceId === deviceId)?.vin || null}
         />
       )}
 
@@ -360,7 +360,6 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
                 <th style={{ padding: 6 }}>Tage aktiv</th>
                 <th style={{ padding: 6 }}>Letzte Meldung</th>
                 <th style={{ padding: 6 }}>Ort</th>
-                <th style={{ padding: 6 }}>VIN</th>
               </tr>
             </thead>
             <tbody>
@@ -394,7 +393,6 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
                         ? `${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`
                         : "–")}
                   </td>
-                  <td style={{ padding: 6 }}>{d.vin || "–"}</td>
                 </tr>
               ))}
             </tbody>
@@ -412,13 +410,8 @@ function ControllingView({
   month,
   activity,
   fuel,
-  deviceName,
-  vin
+  deviceName
 }) {
-  const [showDebug, setShowDebug] = useState(false);
-  const [debugRows, setDebugRows] = useState([]);
-  const [debugLoading, setDebugLoading] = useState(false);
-
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div
@@ -446,10 +439,11 @@ function ControllingView({
         {/* Side cards */}
         <div style={{ display: "grid", gap: 16 }}>
           <FuelCard fuel={fuel?.latest || null} />
+          <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
+            <h3 style={{ marginTop: 0 }}>Tankverlauf</h3>
+            <FuelHistoryChart series={fuel?.series || []} />
+          </div>
           <AlertsCard alerts={fuel?.alerts || []} />
-          <button onClick={() => setShowDebug((v) => !v)}>
-            {showDebug ? "Debug-Tankwerte ausblenden" : "Debug-Tankwerte anzeigen"}
-          </button>
         </div>
       </div>
 
@@ -486,72 +480,8 @@ function ControllingView({
             label="Tank-Alarme"
             value={fuel?.alerts?.length || 0}
           />
-          {vin ? <MetricCard label="VIN" value={vin} /> : null}
         </div>
       </div>
-
-      {showDebug && (
-        <div
-          style={{
-            border: "1px solid #e5e7eb",
-            borderRadius: 12,
-            padding: 12,
-            background: "#fff"
-          }}
-        >
-          <h3 style={{ marginTop: 0 }}>Debug – Tankwerte (Monat {month})</h3>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-            <button
-              onClick={async () => {
-                setDebugLoading(true);
-                try {
-                  const params = new URLSearchParams({ deviceId: activity?.deviceId, month });
-                  const r = await fetch(`${API_BASE}/fuel/debug?${params.toString()}`);
-                  const data = await r.json();
-                  setDebugRows(data.items || []);
-                } catch (e) {
-                  console.error(e);
-                  setDebugRows([]);
-                } finally {
-                  setDebugLoading(false);
-                }
-              }}
-            >
-              Rohdaten laden
-            </button>
-            {debugLoading && <span style={{ color: "#666" }}>lädt…</span>}
-          </div>
-          <div style={{ maxHeight: 260, overflow: "auto", border: "1px solid #f1f5f9", borderRadius: 10 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                  <th style={{ padding: 6, textAlign: "left" }}>Zeit</th>
-                  <th style={{ padding: 6, textAlign: "left" }}>Fuel</th>
-                  <th style={{ padding: 6, textAlign: "left" }}>Keys (attributes)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(debugRows.length ? debugRows : fuel?.series || []).map((s, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                    <td style={{ padding: 6 }}>{new Date(s.time).toLocaleString()}</td>
-                    <td style={{ padding: 6, fontVariantNumeric: "tabular-nums" }}>{s.fuel}</td>
-                    <td style={{ padding: 6, color: "#475569" }}>
-                      {Array.isArray(s.keys) ? s.keys.join(", ") : ""}
-                    </td>
-                  </tr>
-                ))}
-                {!fuel?.series?.length && !debugRows.length && (
-                  <tr>
-                    <td colSpan={3} style={{ padding: 8, color: "#666" }}>
-                      Keine Tankwerte im ausgewählten Monat gefunden.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
     </div>
   );
@@ -629,9 +559,6 @@ function ExportView({
                   {(d.activeSeconds / 3600).toFixed(1)} h
                 </span>
               </div>
-              {d.vin ? (
-                <div style={{ marginLeft: 32, fontSize: 12, color: "#475569" }}>VIN: {d.vin}</div>
-              ) : null}
             </label>
           ))}
           {!fleetDevices.length && <div style={{ color: "#666", fontSize: 12 }}>Keine Fahrzeuge</div>}

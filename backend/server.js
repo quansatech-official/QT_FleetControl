@@ -174,54 +174,6 @@ app.get("/api/fuel/month", async (req, res) => {
 });
 
 /* =======================
-   Fuel – Debug (Rohdaten + extrahierter Wert)
-   ======================= */
-app.get("/api/fuel/debug", async (req, res) => {
-  const deviceId = Number(req.query.deviceId);
-  const month = String(req.query.month || dayjs().format("YYYY-MM"));
-  if (!deviceId || !/^\d{4}-\d{2}$/.test(month)) {
-    return res.status(400).json({ error: "deviceId & month required (YYYY-MM)" });
-  }
-
-  try {
-    const start = dayjs(`${month}-01`).startOf("month");
-    const end = start.add(1, "month");
-
-    const [rows] = await pool.query(
-      `SELECT fixtime, attributes
-       FROM ${tbl("positions")}
-       WHERE deviceid = ? AND fixtime >= ? AND fixtime < ?
-       ORDER BY fixtime ASC
-       LIMIT 200`,
-      [deviceId, start.toDate(), end.toDate()]
-    );
-
-    const items = rows.map((r) => {
-      let attrs = r.attributes;
-      if (Buffer.isBuffer(attrs)) attrs = attrs.toString("utf8");
-      let parsed = null;
-      try {
-        parsed = typeof attrs === "string" ? JSON.parse(attrs) : attrs;
-      } catch {
-        parsed = null;
-      }
-      const keys = parsed && typeof parsed === "object" ? Object.keys(parsed) : [];
-      const fuel = extractFuelValue(r.attributes, cfg.fuelKeys);
-      return {
-        time: r.fixtime,
-        fuel,
-        keys,
-      };
-    });
-
-    res.json({ deviceId, month, items, keysTried: cfg.fuelKeys });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "fuel_debug_failed" });
-  }
-});
-
-/* =======================
    Fleet – Monatsaktivität (Übersicht für viele Geräte)
    ======================= */
 app.get("/api/fleet/activity", async (req, res) => {
@@ -369,8 +321,7 @@ app.get("/api/fleet/status", async (_req, res) => {
         speed: Number(r.speed || 0),
         fuel,
         fuelAlert,
-        fuelError: fuel === null,
-        vin: attrsObj?.vin || attrsObj?.VIN || attrsObj?.vehicleVin || null
+        fuelError: fuel === null
       });
     }
 
