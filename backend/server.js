@@ -27,7 +27,7 @@ const cfg = {
   minMovingSeconds: Number(process.env.MIN_MOVING_SECONDS || 60),
   detailGapSeconds: Number(process.env.DETAIL_GAP_SECONDS || 600), // Segmente enger als dieser Wert werden im Detailreport zusammengelegt
 
-  fuelKeys: (process.env.FUEL_JSON_KEY || "fuel,fuel.level,io48,io[48],attributes.io48")
+  fuelKeys: (process.env.FUEL_JSON_KEY || "fuel,fuel.level,fuelLevel,fuelUsed,fuelConsumption,io48,io[48],attributes.io48")
     .split(",")
     .map((k) => k.trim())
     .filter(Boolean),

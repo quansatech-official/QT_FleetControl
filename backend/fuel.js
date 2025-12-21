@@ -14,8 +14,18 @@ function readPath(obj, path) {
 }
 
 export function extractFuelValue(attributes, keys) {
-  if (!attributes) return null;
-  const obj = typeof attributes === "string" ? JSON.parse(attributes) : attributes;
+  if (attributes === null || attributes === undefined) return null;
+
+  let obj = attributes;
+  if (typeof attributes === "string") {
+    try {
+      obj = JSON.parse(attributes);
+    } catch {
+      // Traccar kann auch mal "null" oder kaputtes JSON liefern – dann brechen wir hier ab.
+      return null;
+    }
+  }
+
   const list = Array.isArray(keys) ? keys : [keys];
   for (const k of list) {
     const raw = k.includes(".") ? readPath(obj, k) : obj?.[k];
