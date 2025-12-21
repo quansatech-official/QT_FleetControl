@@ -2,7 +2,9 @@ import dayjs from "dayjs";
 
 function readPath(obj, path) {
   if (!obj || !path) return null;
-  const parts = path.split(".");
+  const parts = path
+    .replace(/\[(\w+)\]/g, ".$1")
+    .split(".");
   let cur = obj;
   for (const p of parts) {
     cur = cur?.[p];

@@ -26,7 +26,7 @@ const cfg = {
   stopToleranceSec: Number(process.env.STOP_TOLERANCE_SEC || 120),
   minMovingSeconds: Number(process.env.MIN_MOVING_SECONDS || 60),
 
-  fuelKeys: (process.env.FUEL_JSON_KEY || "fuel,fuel.level,io48")
+  fuelKeys: (process.env.FUEL_JSON_KEY || "fuel,fuel.level,io48,io[48],attributes.io48")
     .split(",")
     .map((k) => k.trim())
     .filter(Boolean),
