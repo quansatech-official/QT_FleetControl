@@ -231,7 +231,7 @@ export default function Dashboard() {
         {mode === "controlling" && (
           <>
             <a href={pdfUrl} target="_blank" rel="noreferrer">
-              <button>PDF Fahrtenbuch (Einzelfahrzeug)</button>
+              <button>PDF Fahrtenbuch (kurz)</button>
             </a>
             <a href={pdfDetailUrl} target="_blank" rel="noreferrer">
               <button>PDF Fahrtenbuch Detail</button>
@@ -275,7 +275,6 @@ export default function Dashboard() {
           month={month}
           activity={activity}
           fuel={fuel}
-          fleetActivity={fleetActivity}
           search={search}
           deviceName={filteredDevices.find((d) => d.id === deviceId)?.name || ""}
         />
@@ -411,97 +410,10 @@ function ControllingView({
   month,
   activity,
   fuel,
-  fleetActivity,
-  search,
   deviceName
 }) {
-  const fleetDevices = useMemo(() => {
-    const list = fleetActivity?.devices || [];
-    const term = search.trim().toLowerCase();
-    if (!term) return list;
-    return list.filter((d) => d.name.toLowerCase().includes(term));
-  }, [fleetActivity, search]);
-
-  const totalHours = (fleetActivity?.totals?.activeSeconds || 0) / 3600;
-
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <div
-        style={{
-          border: "1px solid #eee",
-          borderRadius: 12,
-          padding: 12,
-          background: "#f8fafc"
-        }}
-      >
-        <h3 style={{ marginTop: 0, marginBottom: 8 }}>Flotten-Übersicht – {month}</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-          <MetricCard label="Gesamt aktive Stunden" value={totalHours.toFixed(1)} />
-          <MetricCard
-            label="Ø Stunden pro Fahrzeug"
-            value={
-              fleetDevices.length ? (totalHours / fleetDevices.length).toFixed(1) : "-"
-            }
-          />
-          <MetricCard
-            label="Fahrzeuge aktiv"
-            value={fleetDevices.filter((d) => d.activeSeconds > 0).length}
-          />
-        </div>
-        <div style={{ marginTop: 12 }}>
-          <strong>Top 5 Auslastung</strong>
-          <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
-            {(fleetActivity?.devices || []).slice(0, 5).map((d) => (
-              <div key={d.deviceId} style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                <span>{d.name}</span>
-                <span style={{ fontVariantNumeric: "tabular-nums" }}>
-                  {(d.activeSeconds / 3600).toFixed(1)} h
-                </span>
-              </div>
-            ))}
-            {!fleetActivity?.devices?.length && (
-              <div style={{ color: "#666", fontSize: 12 }}>Keine Daten</div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div
-        style={{
-          border: "1px solid #e5e7eb",
-          borderRadius: 12,
-          padding: 12,
-          background: "#fff"
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>Flottenübersicht – Stunden/Monat</h3>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ textAlign: "left", borderBottom: "1px solid #eee" }}>
-                <th style={{ padding: 6 }}>Fahrzeug</th>
-                <th style={{ padding: 6 }}>Aktive Stunden</th>
-                <th style={{ padding: 6 }}>Tage mit Fahrt</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fleetDevices.map((d) => (
-                <tr key={d.deviceId} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                  <td style={{ padding: 6 }}>{d.name}</td>
-                  <td style={{ padding: 6, fontVariantNumeric: "tabular-nums" }}>
-                    {(d.activeSeconds / 3600).toFixed(1)} h
-                  </td>
-                  <td style={{ padding: 6 }}>{d.daysActive}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!fleetDevices.length && (
-            <div style={{ padding: 8, color: "#666" }}>Keine Fahrzeuge gefunden.</div>
-          )}
-        </div>
-      </div>
-
       <div
         style={{
           display: "grid",
