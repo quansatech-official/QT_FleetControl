@@ -31,6 +31,7 @@ export function extractFuelValue(attributes, keys) {
   const list = Array.isArray(keys) ? keys : [keys];
   for (const k of list) {
     const raw = k.includes(".") ? readPath(obj, k) : obj?.[k];
+    if (raw === null || raw === undefined || raw === "") continue;
     const n = Number(raw);
     if (Number.isFinite(n)) return n;
   }
