@@ -411,6 +411,8 @@ function ControllingView({
   fuel,
   deviceName
 }) {
+  const [showDebug, setShowDebug] = useState(false);
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div
@@ -439,6 +441,9 @@ function ControllingView({
         <div style={{ display: "grid", gap: 16 }}>
           <FuelCard fuel={fuel?.latest || null} />
           <AlertsCard alerts={fuel?.alerts || []} />
+          <button onClick={() => setShowDebug((v) => !v)}>
+            {showDebug ? "Debug-Tankwerte ausblenden" : "Debug-Tankwerte anzeigen"}
+          </button>
         </div>
       </div>
 
@@ -477,6 +482,44 @@ function ControllingView({
           />
         </div>
       </div>
+
+      {showDebug && (
+        <div
+          style={{
+            border: "1px solid #e5e7eb",
+            borderRadius: 12,
+            padding: 12,
+            background: "#fff"
+          }}
+        >
+          <h3 style={{ marginTop: 0 }}>Debug – Tankwerte (Monat {month})</h3>
+          <div style={{ maxHeight: 260, overflow: "auto", border: "1px solid #f1f5f9", borderRadius: 10 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                  <th style={{ padding: 6, textAlign: "left" }}>Zeit</th>
+                  <th style={{ padding: 6, textAlign: "left" }}>Fuel</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(fuel?.series || []).map((s, i) => (
+                  <tr key={i} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: 6 }}>{new Date(s.time).toLocaleString()}</td>
+                    <td style={{ padding: 6, fontVariantNumeric: "tabular-nums" }}>{s.fuel}</td>
+                  </tr>
+                ))}
+                {!fuel?.series?.length && (
+                  <tr>
+                    <td colSpan={2} style={{ padding: 8, color: "#666" }}>
+                      Keine Tankwerte im ausgewählten Monat gefunden.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
     </div>
   );
