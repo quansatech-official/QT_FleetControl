@@ -435,15 +435,10 @@ async function buildActivityReport(deviceId, month) {
     const dayRows = rows.filter((r) => dayjs(r.fixtime).format("YYYY-MM-DD") === day);
     const segments = segmentsByDay.get(day) || [];
 
-    const firstSeg = segments[0];
-    const lastSeg = segments[segments.length - 1];
-
-    const startTimeIso = firstSeg
-      ? dayjs(day).startOf("day").add(firstSeg.start, "second").toISOString()
-      : null;
-    const endTimeIso = lastSeg
-      ? dayjs(day).startOf("day").add(lastSeg.end, "second").toISOString()
-      : null;
+    // Start/End nach echter Fahrt (erstes/letztes Sample über Threshold)
+    const movingRows = dayRows.filter((r) => Number(r.speed) >= cfg.minSpeedKmh);
+    const startTimeIso = movingRows.length ? dayjs(movingRows[0].fixtime).toISOString() : null;
+    const endTimeIso = movingRows.length ? dayjs(movingRows[movingRows.length - 1].fixtime).toISOString() : null;
 
     const startPos = startTimeIso ? findNearestPosition(dayRows, startTimeIso) : null;
     const endPos = endTimeIso ? findNearestPosition(dayRows, endTimeIso) : null;
