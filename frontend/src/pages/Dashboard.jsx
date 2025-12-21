@@ -128,7 +128,12 @@ export default function Dashboard() {
     return `${API_BASE}/reports/activity.pdf?deviceId=${deviceId}&month=${month}`;
   }, [deviceId, month]);
 
-  const handleZipExport = async () => {
+  const pdfDetailUrl = useMemo(() => {
+    if (!deviceId) return "#";
+    return `${API_BASE}/reports/activity.pdf?deviceId=${deviceId}&month=${month}&detail=1`;
+  }, [deviceId, month]);
+
+  const handleZipExport = async (detail = false) => {
     if (!exportSelection.length) {
       setExportError("Bitte mindestens ein Fahrzeug wählen.");
       return;
@@ -138,6 +143,7 @@ export default function Dashboard() {
     try {
       const params = new URLSearchParams({ month });
       params.set("deviceIds", exportSelection.join(","));
+      if (detail) params.set("detail", "1");
       const resp = await fetch(`${API_BASE}/reports/activity.zip?${params.toString()}`);
       if (!resp.ok) throw new Error("export_failed");
       const blob = await resp.blob();
@@ -223,9 +229,14 @@ export default function Dashboard() {
 
         {/* Export-Buttons */}
         {mode === "controlling" && (
-          <a href={pdfUrl} target="_blank" rel="noreferrer">
-            <button>PDF Fahrtenbuch (Einzelfahrzeug)</button>
-          </a>
+          <>
+            <a href={pdfUrl} target="_blank" rel="noreferrer">
+              <button>PDF Fahrtenbuch (Einzelfahrzeug)</button>
+            </a>
+            <a href={pdfDetailUrl} target="_blank" rel="noreferrer">
+              <button>PDF Fahrtenbuch Detail</button>
+            </a>
+          </>
         )}
 
         {loading && <span style={{ color: "#666" }}>lädt…</span>}
@@ -607,6 +618,8 @@ function ExportView({
   exportError,
   onExport
 }) {
+  const [detail, setDetail] = useState(false);
+
   const fleetDevices = useMemo(() => {
     const activityMap = new Map();
     (fleetActivity?.devices || []).forEach((d) => activityMap.set(d.deviceId, d));
@@ -674,7 +687,15 @@ function ExportView({
           {!fleetDevices.length && <div style={{ color: "#666", fontSize: 12 }}>Keine Fahrzeuge</div>}
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
-          <button onClick={onExport} disabled={exporting}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#475569" }}>
+            <input
+              type="checkbox"
+              checked={detail}
+              onChange={(e) => setDetail(e.target.checked)}
+            />
+            Detail (Fahrtenliste) in ZIP (beinhaltet zusätzliche Tabelle pro Tag/Fahrt)
+          </label>
+          <button onClick={() => onExport(detail)} disabled={exporting}>
             {exporting ? "Export läuft…" : "ZIP exportieren"}
           </button>
           {exportError && <span style={{ color: "#b91c1c", fontSize: 13 }}>{exportError}</span>}

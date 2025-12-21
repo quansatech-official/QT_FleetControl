@@ -388,7 +388,7 @@ async function resolveAddress(addr, lat, lon) {
   return "Adresse fehlt";
 }
 
-async function buildActivityReport(deviceId, month) {
+async function buildActivityReport(deviceId, month, opts = {}) {
   const start = dayjs(`${month}-01`).startOf("month");
   const end = start.add(1, "month");
 
@@ -449,6 +449,8 @@ async function buildActivityReport(deviceId, month) {
     return R * c;
   };
 
+  const segmentRows = [];
+
   for (let d = 1; d <= daysInMonth; d++) {
     const day = start.date(d).format("YYYY-MM-DD");
     const sec = secondsByDay.get(day) || 0;
@@ -489,6 +491,27 @@ async function buildActivityReport(deviceId, month) {
       })
       .join("");
 
+    if (opts.detail) {
+      for (const seg of segments) {
+        const segStart = dayjs(day).startOf("day").add(seg.start, "second");
+        const segEnd = dayjs(day).startOf("day").add(seg.end, "second");
+        const segStartPos = findNearestPosition(dayRows, segStart.toISOString());
+        const segEndPos = findNearestPosition(dayRows, segEnd.toISOString());
+        segmentRows.push({
+          day,
+          start: segStart.format("HH:mm"),
+          startAddr: segStartPos
+            ? await resolveAddress(segStartPos.address, segStartPos.latitude, segStartPos.longitude)
+            : "-",
+          end: segEnd.format("HH:mm"),
+          endAddr: segEndPos
+            ? await resolveAddress(segEndPos.address, segEndPos.latitude, segEndPos.longitude)
+            : "-",
+          duration: ((seg.end - seg.start) / 3600).toFixed(2),
+        });
+      }
+    }
+
     rowsHtml += `<tr>
       <td>${day}</td>
       <td>${startTimeIso ? dayjs(startTimeIso).format("HH:mm") : "-"}</td>
@@ -507,6 +530,32 @@ async function buildActivityReport(deviceId, month) {
 
   const totalHours = (totalSeconds / 3600).toFixed(2);
   const totalDistanceStr = totalDistanceKm.toFixed(1);
+
+  const detailTable = !opts.detail || !segmentRows.length ? "" : `
+  <h3>Detail – Fahrtenliste</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Tag</th>
+        <th>Start (Zeit)</th>
+        <th>Start (Ort)</th>
+        <th>Ende (Zeit)</th>
+        <th>Ende (Ort)</th>
+        <th class="right">Dauer (h)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${segmentRows.map((r) => `<tr>
+        <td>${r.day}</td>
+        <td>${r.start}</td>
+        <td>${r.startAddr}</td>
+        <td>${r.end}</td>
+        <td>${r.endAddr}</td>
+        <td class="right" style="font-variant-numeric: tabular-nums;">${r.duration}</td>
+      </tr>`).join("")}
+    </tbody>
+  </table>
+  `;
 
   const html = `
 <!DOCTYPE html>
@@ -569,6 +618,8 @@ async function buildActivityReport(deviceId, month) {
     stopTolerance=${cfg.stopToleranceSec}s,
     minBlock=${cfg.minMovingSeconds}s
   </div>
+
+  ${detailTable}
 </body>
 </html>
 `;
@@ -587,13 +638,14 @@ async function buildActivityReport(deviceId, month) {
 app.get("/api/reports/activity.pdf", async (req, res) => {
   const deviceId = Number(req.query.deviceId);
   const month = String(req.query.month || dayjs().format("YYYY-MM"));
+  const detail = req.query.detail === "1" || req.query.detail === "true";
 
   if (!deviceId || !/^\d{4}-\d{2}$/.test(month)) {
     return res.status(400).json({ error: "deviceId & month required (YYYY-MM)" });
   }
 
   try {
-    const { pdf, filename } = await buildActivityReport(deviceId, month);
+    const { pdf, filename } = await buildActivityReport(deviceId, month, { detail });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
@@ -611,6 +663,7 @@ app.get("/api/reports/activity.pdf", async (req, res) => {
    ======================= */
 app.get("/api/reports/activity.zip", async (req, res) => {
   const month = String(req.query.month || dayjs().format("YYYY-MM"));
+  const detail = req.query.detail === "1" || req.query.detail === "true";
   if (!/^\d{4}-\d{2}$/.test(month)) {
     return res.status(400).json({ error: "month required (YYYY-MM)" });
   }
@@ -647,7 +700,7 @@ app.get("/api/reports/activity.zip", async (req, res) => {
 
     for (const id of deviceIds) {
       try {
-        const { pdf, filename } = await buildActivityReport(id, month);
+        const { pdf, filename } = await buildActivityReport(id, month, { detail });
         archive.append(pdf, { name: filename });
       } catch (err) {
         console.error(`bulk_pdf_failed device=${id}`, err);
