@@ -5,8 +5,8 @@ export default function FuelHistoryChart({ series }) {
     const all = series || [];
     if (!all.length) return null;
     const maxPoints = 240;
-    const step = Math.max(1, Math.floor(all.length / maxPoints));
-    const list = all.filter((_, idx) => idx % step === 0);
+    const sampleStep = Math.max(1, Math.floor(all.length / maxPoints));
+    const list = all.filter((_, idx) => idx % sampleStep === 0);
     if (!list.length) return null;
     const values = all.map((d) => Number(d.fuel)).filter((n) => Number.isFinite(n));
     if (!values.length) return null;
@@ -16,11 +16,11 @@ export default function FuelHistoryChart({ series }) {
     const width = 560;
     const height = 120;
     const padding = 12;
-    const step = (width - padding * 2) / (list.length - 1 || 1);
+    const xStep = (width - padding * 2) / (list.length - 1 || 1);
     const coords = list.map((d, i) => {
       const v = Number(d.fuel);
       const y = height - padding - ((v - min) / span) * (height - padding * 2);
-      const x = padding + i * step;
+      const x = padding + i * xStep;
       return [x, y];
     });
     return { coords, min, max, width, height, padding };
