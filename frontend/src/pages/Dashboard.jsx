@@ -503,6 +503,30 @@ function ControllingView({
             label="Tank-Alarme"
             value={fuel?.alerts?.length || 0}
           />
+          <MetricCard
+            label="Soll-Verbrauch (l)"
+            value={fuel?.stats ? fuel.stats.expectedLiters : "–"}
+            hint={
+              fuel?.stats
+                ? `Ø ${fuel.stats.avgConsumptionLPer100Km} l/100km`
+                : ""
+            }
+          />
+          <MetricCard
+            label="Ist-Verbrauch (l)"
+            value={fuel?.stats ? fuel.stats.consumedLiters : "–"}
+            hint={fuel?.stats ? `Distanz ${fuel.stats.distanceKm} km` : ""}
+          />
+          <MetricCard
+            label="Betankt gesamt (l)"
+            value={fuel?.stats ? fuel.stats.refuelLiters : "–"}
+            hint={fuel?.stats ? `Tank ${fuel.stats.tankCapacityLiters} l` : ""}
+          />
+          <MetricCard
+            label="Refuel-Überschuss (l)"
+            value={fuel?.stats ? fuel.stats.refuelSurplusLiters : "–"}
+            hint="Hinweis auf Fremdbetankung"
+          />
         </div>
       </div>
 

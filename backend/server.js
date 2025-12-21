@@ -9,6 +9,28 @@ import { extractFuelValue, detectFuelDrops, detectFuelRefuels } from "./fuel.js"
 import { renderPdfFromHtml } from "./pdf.js";
 
 const SECONDS_DAY = 24 * 3600;
+const DEFAULT_TANK_CAPACITY_LITERS = Number(process.env.TANK_CAPACITY_LITERS || 400);
+const DEFAULT_AVG_L_PER_100KM = Number(process.env.AVG_CONSUMPTION_L_PER_100KM || 30);
+
+function distanceKm(a, b) {
+  if (
+    !Number.isFinite(a?.latitude) ||
+    !Number.isFinite(a?.longitude) ||
+    !Number.isFinite(b?.latitude) ||
+    !Number.isFinite(b?.longitude)
+  ) return 0;
+  const R = 6371;
+  const toRad = (x) => (x * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLon = toRad(b.longitude - a.longitude);
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  return R * c;
+}
 
 const app = express();
 app.use(cors());
@@ -53,6 +75,8 @@ const cfg = {
   fuelWindowMinutes: Number(process.env.FUEL_WINDOW_MINUTES || 10),
   refuelLiters: Number(process.env.FUEL_REFUEL_LITERS || 15),
   refuelPercent: Number(process.env.FUEL_REFUEL_PERCENT || 10),
+  tankCapacityLiters: DEFAULT_TANK_CAPACITY_LITERS,
+  avgConsumptionLPer100Km: DEFAULT_AVG_L_PER_100KM,
   geocodeUrl: process.env.GEOCODE_URL || "https://nominatim.openstreetmap.org/reverse",
 };
 
@@ -139,7 +163,7 @@ app.get("/api/fuel/month", async (req, res) => {
     const end = start.add(1, "month");
 
     const [rows] = await pool.query(
-      `SELECT fixtime, attributes
+      `SELECT fixtime, attributes, latitude, longitude
        FROM ${tbl("positions")}
        WHERE deviceid = ? AND fixtime >= ? AND fixtime < ?
        ORDER BY fixtime ASC`,
@@ -173,7 +197,56 @@ app.get("/api/fuel/month", async (req, res) => {
       refuelPercent: cfg.refuelPercent
     });
 
-    res.json({ deviceId, month, latest, series, alerts: [...alerts, ...refuels].sort((a, b) => a.time.localeCompare(b.time)) });
+    // Distanzberechnung (nur plausible Sprünge)
+    let distanceKmTotal = 0;
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1];
+      const cur = rows[i];
+      const deltaKm = distanceKm(prev, cur);
+      const deltaSec = Math.max(0, dayjs(cur.fixtime).diff(dayjs(prev.fixtime), "second"));
+      if (!deltaSec) continue;
+      const speedKmh = (deltaKm / deltaSec) * 3600;
+      if (speedKmh > cfg.distanceMaxSpeedKmh) continue;
+      distanceKmTotal += deltaKm;
+    }
+
+    // Verbrauchs-/Korrelation-Stats (io48 = Prozent)
+    let consumedPct = 0;
+    let refuelPct = 0;
+    if (series.length > 1) {
+      for (let i = 1; i < series.length; i++) {
+        const delta = series[i].fuel - series[i - 1].fuel;
+        if (delta > 0) refuelPct += delta;
+        if (delta < 0) consumedPct += -delta;
+      }
+    }
+    const netChangePct = series.length ? series[series.length - 1].fuel - series[0].fuel : 0;
+    const consumedLiters = (consumedPct / 100) * cfg.tankCapacityLiters;
+    const refuelLiters = (refuelPct / 100) * cfg.tankCapacityLiters;
+    const netChangeLiters = (netChangePct / 100) * cfg.tankCapacityLiters;
+    const expectedLiters = (distanceKmTotal * cfg.avgConsumptionLPer100Km) / 100;
+    const refuelSurplusLiters = Math.max(
+      0,
+      refuelLiters - expectedLiters - Math.max(netChangeLiters, 0)
+    );
+
+    res.json({
+      deviceId,
+      month,
+      latest,
+      series,
+      alerts: [...alerts, ...refuels].sort((a, b) => a.time.localeCompare(b.time)),
+      stats: {
+        distanceKm: Number(distanceKmTotal.toFixed(1)),
+        expectedLiters: Number(expectedLiters.toFixed(1)),
+        consumedLiters: Number(consumedLiters.toFixed(1)),
+        refuelLiters: Number(refuelLiters.toFixed(1)),
+        netChangeLiters: Number(netChangeLiters.toFixed(1)),
+        refuelSurplusLiters: Number(refuelSurplusLiters.toFixed(1)),
+        avgConsumptionLPer100Km: cfg.avgConsumptionLPer100Km,
+        tankCapacityLiters: cfg.tankCapacityLiters
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "fuel_failed" });
