@@ -431,7 +431,7 @@ function ControllingView({
           background: "#f8fafc"
         }}
       >
-        <h3 style={{ marginTop: 0, marginBottom: 8 }}>Flotten-KPIs – {month}</h3>
+        <h3 style={{ marginTop: 0, marginBottom: 8 }}>Flotten-Übersicht – {month}</h3>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
           <MetricCard label="Gesamt aktive Stunden" value={totalHours.toFixed(1)} />
           <MetricCard

@@ -1,11 +1,26 @@
 import dayjs from "dayjs";
 
-export function extractFuelValue(attributes, key) {
+function readPath(obj, path) {
+  if (!obj || !path) return null;
+  const parts = path.split(".");
+  let cur = obj;
+  for (const p of parts) {
+    cur = cur?.[p];
+    if (cur === undefined) return null;
+  }
+  return cur;
+}
+
+export function extractFuelValue(attributes, keys) {
   if (!attributes) return null;
   const obj = typeof attributes === "string" ? JSON.parse(attributes) : attributes;
-  const v = obj?.[key];
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+  const list = Array.isArray(keys) ? keys : [keys];
+  for (const k of list) {
+    const raw = k.includes(".") ? readPath(obj, k) : obj?.[k];
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
 }
 
 export function detectFuelDrops(series, cfg) {

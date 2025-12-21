@@ -26,7 +26,10 @@ const cfg = {
   stopToleranceSec: Number(process.env.STOP_TOLERANCE_SEC || 120),
   minMovingSeconds: Number(process.env.MIN_MOVING_SECONDS || 60),
 
-  fuelKey: process.env.FUEL_JSON_KEY || "fuel",
+  fuelKeys: (process.env.FUEL_JSON_KEY || "fuel,fuel.level,io48")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean),
   fuelDropLiters: Number(process.env.FUEL_DROP_LITERS || 10),
   fuelDropPercent: Number(process.env.FUEL_DROP_PERCENT || 8),
   fuelWindowMinutes: Number(process.env.FUEL_WINDOW_MINUTES || 10),
@@ -126,7 +129,7 @@ app.get("/api/fuel/month", async (req, res) => {
     // Downsample: 1 Wert pro Minute (letzter Wert pro Minute)
     const byMinute = new Map();
     for (const r of rows) {
-      const fuel = extractFuelValue(r.attributes, cfg.fuelKey);
+      const fuel = extractFuelValue(r.attributes, cfg.fuelKeys);
       if (fuel === null) continue;
       const key = dayjs(r.fixtime).format("YYYY-MM-DD HH:mm");
       byMinute.set(key, {
@@ -248,7 +251,7 @@ app.get("/api/fleet/status", async (_req, res) => {
     for (const r of rows) {
       let fuel = null;
       try {
-        fuel = extractFuelValue(r.attributes, cfg.fuelKey);
+        fuel = extractFuelValue(r.attributes, cfg.fuelKeys);
       } catch {
         fuel = null;
       }
@@ -267,7 +270,7 @@ app.get("/api/fleet/status", async (_req, res) => {
         const series = recentRows
           .map((p) => ({
             time: p.fixtime,
-            fuel: extractFuelValue(p.attributes, cfg.fuelKey)
+            fuel: extractFuelValue(p.attributes, cfg.fuelKeys)
           }))
           .filter((p) => p.fuel !== null)
           .sort((a, b) => a.time.localeCompare(b.time));
@@ -495,7 +498,7 @@ async function buildActivityReport(deviceId, month) {
       <td style="text-align:right; font-variant-numeric: tabular-nums;">${dayDistance.toFixed(1)} km</td>
       <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
       <td>
-        <div style="position:relative; height:16px; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;">
+        <div style="position:relative; height:22px; background:#f1f5f9; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden;">
           ${timeline || ""}
         </div>
       </td>
