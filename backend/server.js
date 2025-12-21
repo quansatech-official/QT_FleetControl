@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import archiver from "archiver";
-import fetch from "node-fetch";
 import dayjs from "dayjs";
 
 import { createPoolFromEnv } from "./db.js";
