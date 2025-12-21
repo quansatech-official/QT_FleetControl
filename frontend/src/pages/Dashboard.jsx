@@ -222,9 +222,14 @@ export default function Dashboard() {
 
         {/* ZIP Export (Auswahl) nur im Controlling */}
         {mode === "controlling" && (
-          <button onClick={handleZipExport} disabled={exporting}>
-            {exporting ? "Export läuft…" : "ZIP Fahrtenbuch (Auswahl)"}
-          </button>
+          <>
+            <a href={pdfUrl} target="_blank" rel="noreferrer">
+              <button>PDF Fahrtenbuch (Einzelfahrzeug)</button>
+            </a>
+            <button onClick={handleZipExport} disabled={exporting}>
+              {exporting ? "Export läuft…" : "ZIP Fahrtenbuch (Auswahl)"}
+            </button>
+          </>
         )}
 
         {loading && <span style={{ color: "#666" }}>lädt…</span>}
