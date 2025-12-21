@@ -1,9 +1,20 @@
 import React, { useMemo } from "react";
 
 const SECONDS_DAY = 24 * 3600;
+const TIME_MARKERS = [0, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24];
 
 // Simple per-day timeline: blue segments for Fahrzeit, gaps for Stillstand.
 export default function ActivityBarChart({ data }) {
+  const timeMarkers = useMemo(
+    () =>
+      TIME_MARKERS.map((h) => ({
+        hour: h,
+        left: (h / 24) * 100,
+        label: String(h).padStart(2, "0"),
+      })),
+    []
+  );
+
   const days = useMemo(
     () =>
       (data || []).map((d) => ({
@@ -37,12 +48,27 @@ export default function ActivityBarChart({ data }) {
         }}
       >
         <span />
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span>00</span>
-          <span>12</span>
-          <span>24</span>
+        <div style={{ position: "relative", height: 18 }}>
+          {timeMarkers.map((m) => (
+            <span
+              key={m.hour}
+              style={{
+                position: "absolute",
+                left: `${m.left}%`,
+                transform:
+                  m.hour === 0
+                    ? "translateX(0)"
+                    : m.hour === 24
+                    ? "translateX(-100%)"
+                    : "translateX(-50%)",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {m.label}
+            </span>
+          ))}
         </div>
-        <span style={{ textAlign: "right" }}>h</span>
+        <span style={{ textAlign: "right" }}>Uhr</span>
       </div>
 
       {days.map((d) => (
@@ -69,6 +95,19 @@ export default function ActivityBarChart({ data }) {
               border: "1px solid #e5e7eb",
             }}
           >
+            {timeMarkers.map((m) => (
+              <div
+                key={m.hour}
+                style={{
+                  position: "absolute",
+                  left: `${m.left}%`,
+                  top: 0,
+                  bottom: 0,
+                  width: 1,
+                  background: "#e5e7eb",
+                }}
+              />
+            ))}
             {d.segments.map((s, idx) => {
               const left = (s.start / SECONDS_DAY) * 100;
               const width = ((s.end - s.start) / SECONDS_DAY) * 100;

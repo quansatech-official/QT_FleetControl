@@ -150,6 +150,121 @@ app.get("/api/fuel/month", async (req, res) => {
 });
 
 /* =======================
+   Fleet – Monatsaktivität (Übersicht für viele Geräte)
+   ======================= */
+app.get("/api/fleet/activity", async (req, res) => {
+  const month = String(req.query.month || dayjs().format("YYYY-MM")); // YYYY-MM
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: "month required (YYYY-MM)" });
+  }
+
+  try {
+    const start = dayjs(`${month}-01`).startOf("month");
+    const end = start.add(1, "month");
+
+    const [rows] = await pool.query(
+      `SELECT d.id AS deviceId, d.name, p.fixtime, p.speed
+       FROM ${tbl("devices")} d
+       LEFT JOIN ${tbl("positions")} p
+         ON p.deviceid = d.id AND p.fixtime >= ? AND p.fixtime < ?
+       WHERE d.disabled = 0
+       ORDER BY d.id, p.fixtime`,
+      [start.toDate(), end.toDate()]
+    );
+
+    const byDevice = new Map();
+    for (const r of rows) {
+      if (!byDevice.has(r.deviceId)) {
+        byDevice.set(r.deviceId, { name: r.name, rows: [] });
+      }
+      if (r.fixtime) {
+        byDevice.get(r.deviceId).rows.push({ fixtime: r.fixtime, speed: r.speed });
+      }
+    }
+
+    let totalSeconds = 0;
+    const devices = [];
+
+    for (const [deviceId, info] of byDevice.entries()) {
+      const { secondsByDay } = computeDailyActivity(info.rows, cfg);
+      let activeSeconds = 0;
+      let daysActive = 0;
+      for (const sec of secondsByDay.values()) {
+        activeSeconds += sec;
+        if (sec > 0) daysActive += 1;
+      }
+      totalSeconds += activeSeconds;
+      devices.push({
+        deviceId,
+        name: info.name,
+        activeSeconds,
+        daysActive
+      });
+    }
+
+    devices.sort((a, b) => b.activeSeconds - a.activeSeconds);
+
+    res.json({
+      month,
+      devices,
+      totals: {
+        activeSeconds: totalSeconds
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "fleet_activity_failed" });
+  }
+});
+
+/* =======================
+   Fleet – Aktueller Status (Dispatcher)
+   ======================= */
+app.get("/api/fleet/status", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT d.id AS deviceId, d.name, p.fixtime, p.latitude, p.longitude, p.speed, p.attributes
+       FROM ${tbl("devices")} d
+       LEFT JOIN (
+         SELECT p1.*
+         FROM ${tbl("positions")} p1
+         JOIN (
+           SELECT deviceid, MAX(fixtime) AS maxFix
+           FROM ${tbl("positions")}
+           GROUP BY deviceid
+         ) latest
+         ON latest.deviceid = p1.deviceid AND latest.maxFix = p1.fixtime
+       ) p ON p.deviceid = d.id
+       WHERE d.disabled = 0
+       ORDER BY d.name`
+    );
+
+    const devices = rows.map((r) => {
+      let fuel = null;
+      try {
+        fuel = extractFuelValue(r.attributes, cfg.fuelKey);
+      } catch {
+        fuel = null;
+      }
+      return {
+        deviceId: r.deviceId,
+        name: r.name,
+        lastFix: r.fixtime,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        speed: Number(r.speed || 0),
+        fuel
+      };
+    });
+
+    res.json({ devices });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "fleet_status_failed" });
+  }
+});
+
+/* =======================
    PDF – Activity Monat
    ======================= */
 app.get("/api/reports/activity.pdf", async (req, res) => {
