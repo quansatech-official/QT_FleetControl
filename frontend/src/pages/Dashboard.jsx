@@ -275,7 +275,6 @@ export default function Dashboard() {
           month={month}
           activity={activity}
           fuel={fuel}
-          search={search}
           deviceName={filteredDevices.find((d) => d.id === deviceId)?.name || ""}
         />
       )}
@@ -479,34 +478,6 @@ function ControllingView({
         </div>
       </div>
 
-      <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Flottenübersicht – Stunden/Monat</h3>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ textAlign: "left", borderBottom: "1px solid #eee" }}>
-                <th style={{ padding: 6 }}>Fahrzeug</th>
-                <th style={{ padding: 6 }}>Aktive Stunden</th>
-                <th style={{ padding: 6 }}>Tage mit Fahrt</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fleetDevices.map((d) => (
-                <tr key={d.deviceId} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                  <td style={{ padding: 6 }}>{d.name}</td>
-                  <td style={{ padding: 6, fontVariantNumeric: "tabular-nums" }}>
-                    {(d.activeSeconds / 3600).toFixed(1)} h
-                  </td>
-                  <td style={{ padding: 6 }}>{d.daysActive}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!fleetDevices.length && (
-            <div style={{ padding: 8, color: "#666" }}>Keine Fahrzeuge gefunden.</div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
