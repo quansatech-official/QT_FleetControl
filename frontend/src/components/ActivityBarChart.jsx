@@ -96,17 +96,30 @@ export default function ActivityBarChart({ data }) {
             }}
           >
             {timeMarkers.map((m) => (
-              <div
-                key={m.hour}
-                style={{
-                  position: "absolute",
-                  left: `${m.left}%`,
-                  top: 0,
-                  bottom: 0,
-                  width: 1,
-                  background: "#e5e7eb",
-                }}
-              />
+              <React.Fragment key={m.hour}>
+                {/* Main ruler line */}
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${m.left}%`,
+                    top: 0,
+                    bottom: 0,
+                    width: 1,
+                    background: "#e5e7eb",
+                  }}
+                />
+                {/* Small tick on top for ruler feel */}
+                <div
+                  style={{
+                    position: "absolute",
+                    left: `${m.left}%`,
+                    top: 0,
+                    width: 1,
+                    height: 6,
+                    background: "#94a3b8",
+                  }}
+                />
+              </React.Fragment>
             ))}
             {d.segments.map((s, idx) => {
               const left = (s.start / SECONDS_DAY) * 100;
