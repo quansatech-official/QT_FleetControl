@@ -145,7 +145,6 @@ export default function Dashboard() {
           {[
             { key: "overview", label: "Übersicht" },
             { key: "controlling", label: "Controlling" },
-            { key: "werkstatt", label: "Werkstatt" },
             { key: "fahrzeuge", label: "Fahrzeuge (alle)" }
           ].map((m) => (
             <button
@@ -238,16 +237,6 @@ export default function Dashboard() {
           search={search}
           exportSelection={exportSelection}
           setExportSelection={setExportSelection}
-        />
-      )}
-
-      {mode === "werkstatt" && (
-        <WerkstattView
-          month={month}
-          fuel={fuel}
-          activity={activity}
-          fleetStatus={fleetStatus}
-          onRefresh={refreshStatus}
         />
       )}
 
@@ -665,69 +654,6 @@ function ControllingView({
             <div style={{ padding: 8, color: "#666" }}>Keine Fahrzeuge gefunden.</div>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-function WerkstattView({ month, fuel, activity, fleetStatus, onRefresh }) {
-  const latestStatus = useMemo(() => {
-    if (!fleetStatus?.length) return null;
-    return fleetStatus.find((s) => s.deviceId === activity?.deviceId) || null;
-  }, [fleetStatus, activity]);
-
-  return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <strong>Werkstatt-Ansicht</strong>
-        <span style={{ color: "#666" }}>
-          Fokus auf Tankabfälle & letzte Meldungen ({month})
-        </span>
-        <button onClick={onRefresh}>Letzte Position laden</button>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 16
-        }}
-      >
-        <FuelCard fuel={fuel?.latest || null} />
-        <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
-          <h3 style={{ marginTop: 0 }}>Letzte Meldung</h3>
-          {latestStatus ? (
-            <div style={{ display: "grid", gap: 4, fontSize: 14 }}>
-              <div><strong>Zeit:</strong> {latestStatus.lastFix ? new Date(latestStatus.lastFix).toLocaleString() : "–"}</div>
-              <div><strong>Speed:</strong> {latestStatus.speed?.toFixed(1)} km/h</div>
-              <div><strong>Tank:</strong> {latestStatus.fuel ?? "-"} </div>
-              <div>
-                <strong>Koordinaten:</strong>{" "}
-                {latestStatus.latitude && latestStatus.longitude
-                  ? `${latestStatus.latitude.toFixed(5)}, ${latestStatus.longitude.toFixed(5)}`
-                  : "–"}
-              </div>
-            </div>
-          ) : (
-            <div style={{ color: "#666" }}>Keine Statusdaten geladen.</div>
-          )}
-        </div>
-      </div>
-
-      <AlertsCard alerts={fuel?.alerts || []} />
-
-      <div
-        style={{
-          border: "1px solid #eee",
-          borderRadius: 12,
-          padding: 12
-        }}
-      >
-        <h3 style={{ marginTop: 0 }}>Fahrzeit – Detail (Werkstatt)</h3>
-        <p style={{ marginTop: 0, color: "#666" }}>
-          Nutzen Sie die Fahrzeitblöcke um Servicefenster zu planen.
-        </p>
-        <ActivityBarChart data={activity?.days || []} />
       </div>
     </div>
   );

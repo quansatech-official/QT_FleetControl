@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import archiver from "archiver";
+import fetch from "node-fetch";
 import dayjs from "dayjs";
 
 import { createPoolFromEnv } from "./db.js";
@@ -28,6 +29,7 @@ const cfg = {
   fuelDropLiters: Number(process.env.FUEL_DROP_LITERS || 10),
   fuelDropPercent: Number(process.env.FUEL_DROP_PERCENT || 8),
   fuelWindowMinutes: Number(process.env.FUEL_WINDOW_MINUTES || 10),
+  geocodeUrl: process.env.GEOCODE_URL || "https://nominatim.openstreetmap.org/reverse",
 };
 
 /* =======================
@@ -278,13 +280,15 @@ app.get("/api/fleet/status", async (_req, res) => {
         console.error("fuel_alert_detect_failed", err);
       }
 
+      const resolvedAddress = await resolveAddress(r.address, r.latitude, r.longitude);
+
       devices.push({
         deviceId: r.deviceId,
         name: r.name,
         lastFix: r.fixtime,
         latitude: r.latitude,
         longitude: r.longitude,
-        address: r.address,
+        address: resolvedAddress,
         speed: Number(r.speed || 0),
         fuel,
         fuelAlert,
@@ -299,12 +303,85 @@ app.get("/api/fleet/status", async (_req, res) => {
   }
 });
 
-function formatAddress(addr, lat, lon) {
-  if (addr && typeof addr === "string" && addr.trim()) return addr;
-  if (Number.isFinite(lat) && Number.isFinite(lon)) {
-    return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+const geocodeCache = new Map(); // key -> { value, expires }
+
+function normalizeAddress(addr) {
+  if (!addr) return null;
+  try {
+    if (typeof addr === "string") {
+      const trimmed = addr.trim();
+      if (!trimmed) return null;
+      if (trimmed.startsWith("{")) {
+        const parsed = JSON.parse(trimmed);
+        const parts = [
+          parsed.road || parsed.street,
+          parsed.house_number,
+          parsed.postcode,
+          parsed.city || parsed.town || parsed.village,
+        ].filter(Boolean);
+        if (parts.length) return parts.join(", ");
+      }
+      return trimmed;
+    } else if (typeof addr === "object") {
+      const parts = [
+        addr.road || addr.street,
+        addr.house_number,
+        addr.postcode,
+        addr.city || addr.town || addr.village,
+      ].filter(Boolean);
+      if (parts.length) return parts.join(", ");
+    }
+  } catch {
+    return null;
   }
-  return "-";
+  return null;
+}
+
+async function reverseGeocode(lat, lon) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+  const cached = geocodeCache.get(key);
+  const now = Date.now();
+  if (cached && cached.expires > now) return cached.value;
+
+  try {
+    const url = `${cfg.geocodeUrl}?format=jsonv2&lat=${lat}&lon=${lon}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 7000);
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": "QT-FleetControl/1.0 (fleet)",
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!r.ok) throw new Error(`geocode_failed_${r.status}`);
+    const data = await r.json();
+    const addr = data.address || {};
+    const parts = [
+      addr.road || addr.pedestrian || addr.cycleway || addr.footway,
+      addr.house_number,
+      addr.postcode,
+      addr.city || addr.town || addr.village,
+    ].filter(Boolean);
+    const resolved = parts.length ? parts.join(", ") : data.display_name || null;
+    if (resolved) {
+      geocodeCache.set(key, { value: resolved, expires: now + 24 * 3600 * 1000 });
+      return resolved;
+    }
+  } catch (err) {
+    console.error("reverse_geocode_failed", err);
+  }
+  return null;
+}
+
+async function resolveAddress(addr, lat, lon) {
+  const normalized = normalizeAddress(addr);
+  if (normalized) return normalized;
+  const geo = await reverseGeocode(lat, lon);
+  if (geo) return geo;
+  if (Number.isFinite(lat) && Number.isFinite(lon)) return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  return "Adresse fehlt";
 }
 
 async function buildActivityReport(deviceId, month) {
@@ -343,12 +420,19 @@ async function buildActivityReport(deviceId, month) {
     const startPos = dayRows[0];
     const endPos = dayRows[dayRows.length - 1];
 
+    const startAddress = startPos
+      ? await resolveAddress(startPos.address, startPos.latitude, startPos.longitude)
+      : "-";
+    const endAddress = endPos
+      ? await resolveAddress(endPos.address, endPos.latitude, endPos.longitude)
+      : "-";
+
     rowsHtml += `<tr>
       <td>${day}</td>
       <td>${startPos ? dayjs(startPos.fixtime).format("HH:mm") : "-"}</td>
-      <td>${startPos ? formatAddress(startPos.address, startPos.latitude, startPos.longitude) : "-"}</td>
+      <td>${startAddress}</td>
       <td>${endPos ? dayjs(endPos.fixtime).format("HH:mm") : "-"}</td>
-      <td>${endPos ? formatAddress(endPos.address, endPos.latitude, endPos.longitude) : "-"}</td>
+      <td>${endAddress}</td>
       <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
       <td>
         <div style="background:#f3f4f6; border:1px solid #e5e7eb; border-radius:8px; height:12px; position:relative; overflow:hidden;">
