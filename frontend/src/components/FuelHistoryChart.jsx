@@ -2,9 +2,13 @@ import React, { useMemo } from "react";
 
 export default function FuelHistoryChart({ series }) {
   const points = useMemo(() => {
-    const list = (series || []).slice(-240);
+    const all = series || [];
+    if (!all.length) return null;
+    const maxPoints = 240;
+    const step = Math.max(1, Math.floor(all.length / maxPoints));
+    const list = all.filter((_, idx) => idx % step === 0);
     if (!list.length) return null;
-    const values = list.map((d) => Number(d.fuel)).filter((n) => Number.isFinite(n));
+    const values = all.map((d) => Number(d.fuel)).filter((n) => Number.isFinite(n));
     if (!values.length) return null;
     const min = Math.min(...values);
     const max = Math.max(...values);
@@ -50,8 +54,8 @@ export default function FuelHistoryChart({ series }) {
         <path d={path} fill="none" stroke="url(#fuelLine)" strokeWidth="2" />
       </svg>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#64748b" }}>
-        <span>Min: {points.min.toFixed(1)}</span>
-        <span>Max: {points.max.toFixed(1)}</span>
+        <span>Min (Monat): {points.min.toFixed(1)}</span>
+        <span>Max (Monat): {points.max.toFixed(1)}</span>
       </div>
     </div>
   );
