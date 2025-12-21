@@ -249,6 +249,64 @@ app.get("/api/fleet/activity", async (req, res) => {
 });
 
 /* =======================
+   Fleet – Monatsalarme (nur negative Drops)
+   ======================= */
+app.get("/api/fleet/alerts", async (req, res) => {
+  const month = String(req.query.month || dayjs().format("YYYY-MM"));
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: "month required (YYYY-MM)" });
+  }
+
+  try {
+    const start = dayjs(`${month}-01`).startOf("month");
+    const end = start.add(1, "month");
+
+    const [devices] = await pool.query(
+      `SELECT id FROM ${tbl("devices")} WHERE disabled = 0`
+    );
+
+    let totalDrops = 0;
+
+    for (const d of devices) {
+      const [rows] = await pool.query(
+        `SELECT fixtime, attributes
+         FROM ${tbl("positions")}
+         WHERE deviceid = ? AND fixtime >= ? AND fixtime < ?
+         ORDER BY fixtime ASC`,
+        [d.id, start.toDate(), end.toDate()]
+      );
+
+      const byMinute = new Map();
+      for (const r of rows) {
+        const fuel = extractFuelValue(r.attributes, cfg.fuelKeys);
+        if (fuel === null) continue;
+        const key = dayjs(r.fixtime).format("YYYY-MM-DD HH:mm");
+        byMinute.set(key, {
+          time: dayjs(r.fixtime).toISOString(),
+          fuel
+        });
+      }
+
+      const series = Array.from(byMinute.values())
+        .sort((a, b) => a.time.localeCompare(b.time));
+
+      const drops = detectFuelDrops(series, {
+        dropLiters: cfg.fuelDropLiters,
+        dropPercent: cfg.fuelDropPercent,
+        windowMinutes: cfg.fuelWindowMinutes
+      });
+
+      totalDrops += drops.length;
+    }
+
+    res.json({ month, totalDrops });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "fleet_alerts_failed" });
+  }
+});
+
+/* =======================
    Fleet – Aktueller Status (Dispatcher)
    ======================= */
 app.get("/api/fleet/status", async (_req, res) => {
@@ -550,7 +608,7 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       .map((s) => {
         const left = (s.start / SECONDS_DAY) * 100;
         const width = ((s.end - s.start) / SECONDS_DAY) * 100;
-        return `<span style="position:absolute; left:${left}%; width:${width}%; top:0; bottom:0; background:#2563eb;"></span>`;
+        return `<span class="bar-seg" style="left:${left}%; width:${width}%;"></span>`;
       })
       .join("");
 
@@ -584,7 +642,7 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       <td style="text-align:right; font-variant-numeric: tabular-nums;">${dayDistance.toFixed(1)} km</td>
       <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
       <td>
-        <div style="position:relative; height:22px; background:#f1f5f9; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden;">
+        <div class="bar">
           ${timeline || ""}
         </div>
       </td>
@@ -595,20 +653,22 @@ async function buildActivityReport(deviceId, month, opts = {}) {
   const totalDistanceStr = totalDistanceKm.toFixed(1);
 
   const detailTable = !opts.detail || !segmentRows.length ? "" : `
-  <h3>Detail – Fahrtenliste</h3>
-  <table>
+  <div class="page-break"></div>
+  <h2>Detail – Fahrtenliste</h2>
+  <div class="subtle">Einzelfahrten gemäß Fahrzeitblöcken</div>
+  <table class="detail-table">
     <thead>
       <tr>
         <th>Tag</th>
-        <th>Start (Zeit)</th>
-        <th>Start (Ort)</th>
-        <th>Ende (Zeit)</th>
-        <th>Ende (Ort)</th>
+        <th>Start</th>
+        <th>Start-Ort</th>
+        <th>Ende</th>
+        <th>Ende-Ort</th>
         <th class="right">Dauer (h)</th>
       </tr>
     </thead>
     <tbody>
-      ${segmentRows.map((r) => `<tr>
+      ${segmentRows.map((r, i) => `<tr class="${i % 2 ? "row-alt" : ""}">
         <td>${r.day}</td>
         <td>${r.start}</td>
         <td>${r.startAddr}</td>
@@ -626,15 +686,27 @@ async function buildActivityReport(deviceId, month, opts = {}) {
 <head>
   <meta charset="utf-8"/>
   <style>
-    body { font-family: Arial, sans-serif; font-size: 12px; }
-    h1 { font-size: 18px; margin: 0 0 8px; }
-    .meta { margin-bottom: 12px; }
-    .badge { display:inline-block; padding:4px 8px; border:1px solid #ddd; border-radius:999px; margin-right:6px; }
+    body { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 12px; color:#0f172a; }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    h2 { font-size: 16px; margin: 0 0 6px; }
+    .meta { margin-bottom: 10px; }
+    .badge { display:inline-block; padding:4px 10px; border:1px solid #e2e8f0; border-radius:999px; margin-right:6px; background:#f8fafc; }
+    .summary { display:flex; gap:10px; margin:10px 0 12px; }
+    .card { border:1px solid #e2e8f0; border-radius:10px; padding:8px 10px; background:#fff; min-width:140px; }
+    .card .label { color:#64748b; font-size:11px; }
+    .card .value { font-size:16px; font-weight:700; margin-top:2px; }
     table { width:100%; border-collapse: collapse; }
-    th, td { border-bottom:1px solid #eee; padding:6px 4px; vertical-align:middle; }
-    th { background:#fafafa; text-align:left; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:6px 6px; vertical-align:middle; }
+    th { background:#f8fafc; text-align:left; }
     .right { text-align:right; }
-    .footer { margin-top:12px; color:#666; font-size:10px; }
+    .subtle { color:#64748b; margin-bottom:6px; font-size:11px; }
+    .bar { position:relative; height:18px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden;
+           background-image: repeating-linear-gradient(to right, #e2e8f0 0, #e2e8f0 1px, transparent 1px, transparent 4.1667%); }
+    .bar-seg { position:absolute; top:0; bottom:0; background:#2563eb; }
+    .page-break { page-break-before: always; }
+    .detail-table th, .detail-table td { padding:5px 6px; }
+    .row-alt { background:#f8fafc; }
+    .footer { margin-top:12px; color:#64748b; font-size:10px; }
   </style>
 </head>
 <body>
@@ -643,6 +715,16 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     <span class="badge">Fahrzeug: ${device?.name || deviceId}</span>
     <span class="badge">Monat: ${month}</span>
     <span class="badge">Gültig: Fahrtenbuch AT</span>
+  </div>
+  <div class="summary">
+    <div class="card">
+      <div class="label">Gesamtstunden</div>
+      <div class="value">${totalHours} h</div>
+    </div>
+    <div class="card">
+      <div class="label">Gesamtdistanz</div>
+      <div class="value">${totalDistanceStr} km</div>
+    </div>
   </div>
 
   <table>

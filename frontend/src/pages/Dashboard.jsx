@@ -25,6 +25,7 @@ export default function Dashboard() {
   const [exportSelection, setExportSelection] = useState([]);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
+  const [fleetAlerts, setFleetAlerts] = useState(0);
 
   const [loading, setLoading] = useState(false);
   const [fleetLoading, setFleetLoading] = useState(false);
@@ -99,6 +100,15 @@ export default function Dashboard() {
         setError("Flottenübersicht konnte nicht geladen werden");
       })
       .finally(() => setFleetLoading(false));
+  }, [month]);
+
+  useEffect(() => {
+    apiGet(`/fleet/alerts?month=${month}`)
+      .then((res) => setFleetAlerts(res?.totalDrops || 0))
+      .catch((e) => {
+        console.error(e);
+        setFleetAlerts(0);
+      });
   }, [month]);
 
   /* =====================
@@ -343,6 +353,7 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
             }
             hint={`Monat ${month}`}
           />
+          <MetricCard label="Alarme (Monat)" value={fleetAlerts} />
         </div>
       </Section>
 
