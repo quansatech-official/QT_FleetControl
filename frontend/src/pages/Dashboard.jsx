@@ -22,6 +22,8 @@ export default function Dashboard() {
   const [fleetActivity, setFleetActivity] = useState(null);
   const [fleetStatus, setFleetStatus] = useState([]);
   const [exportSelection, setExportSelection] = useState([]);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [fleetLoading, setFleetLoading] = useState(false);
@@ -126,6 +128,35 @@ export default function Dashboard() {
     return `${API_BASE}/reports/activity.pdf?deviceId=${deviceId}&month=${month}`;
   }, [deviceId, month]);
 
+  const handleZipExport = async () => {
+    if (!exportSelection.length) {
+      setExportError("Bitte mindestens ein Fahrzeug wählen.");
+      return;
+    }
+    setExportError("");
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ month });
+      params.set("deviceIds", exportSelection.join(","));
+      const resp = await fetch(`${API_BASE}/reports/activity.zip?${params.toString()}`);
+      if (!resp.ok) throw new Error("export_failed");
+      const blob = await resp.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Fahrtenbuch_${month}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      setExportError("Export fehlgeschlagen");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   /* =====================
      Render
      ===================== */
@@ -190,11 +221,11 @@ export default function Dashboard() {
         {/* Month picker */}
         <MonthPicker month={month} setMonth={setMonth} />
 
-        {/* PDF Export */}
-        {mode !== "overview" && mode !== "fahrzeuge" && (
-          <a href={pdfUrl} target="_blank" rel="noreferrer">
-            <button>PDF Fahrtenbuch (Monat)</button>
-          </a>
+        {/* ZIP Export (Auswahl) nur im Controlling */}
+        {mode === "controlling" && (
+          <button onClick={handleZipExport} disabled={exporting}>
+            {exporting ? "Export läuft…" : "ZIP Fahrtenbuch (Auswahl)"}
+          </button>
         )}
 
         {loading && <span style={{ color: "#666" }}>lädt…</span>}
@@ -237,6 +268,9 @@ export default function Dashboard() {
           search={search}
           exportSelection={exportSelection}
           setExportSelection={setExportSelection}
+          exporting={exporting}
+          exportError={exportError}
+          onExport={handleZipExport}
         />
       )}
 
@@ -446,10 +480,11 @@ function ControllingView({
   fleetActivity,
   search,
   exportSelection,
-  setExportSelection
+  setExportSelection,
+  exporting,
+  exportError,
+  onExport
 }) {
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState("");
   const fleetDevices = useMemo(() => {
     const list = fleetActivity?.devices || [];
     const term = search.trim().toLowerCase();
@@ -482,35 +517,6 @@ function ControllingView({
   const toggleAll = () => {
     const allIds = fleetDevices.map((d) => d.deviceId);
     setExportSelection(allIds);
-  };
-
-  const handleExport = async () => {
-    if (!exportSelection.length) {
-      setExportError("Bitte mindestens ein Fahrzeug wählen.");
-      return;
-    }
-    setExportError("");
-    setExporting(true);
-    try {
-      const params = new URLSearchParams({ month });
-      params.set("deviceIds", exportSelection.join(","));
-      const resp = await fetch(`${API_BASE}/reports/activity.zip?${params.toString()}`);
-      if (!resp.ok) throw new Error("export_failed");
-      const blob = await resp.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Fahrtenbuch_${month}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error(e);
-      setExportError("Export fehlgeschlagen");
-    } finally {
-      setExporting(false);
-    }
   };
 
   return (
@@ -591,7 +597,7 @@ function ControllingView({
           {!fleetDevices.length && <div style={{ color: "#666", fontSize: 12 }}>Keine Fahrzeuge</div>}
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button onClick={handleExport} disabled={exporting}>
+          <button onClick={onExport} disabled={exporting}>
             {exporting ? "Export läuft…" : "ZIP exportieren"}
           </button>
           {exportError && <span style={{ color: "#b91c1c", fontSize: 13 }}>{exportError}</span>}

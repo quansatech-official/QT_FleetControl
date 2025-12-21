@@ -8,6 +8,8 @@ import { computeDailyActivity } from "./activity.js";
 import { extractFuelValue, detectFuelDrops } from "./fuel.js";
 import { renderPdfFromHtml } from "./pdf.js";
 
+const SECONDS_DAY = 24 * 3600;
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -402,11 +404,26 @@ async function buildActivityReport(deviceId, month) {
     [deviceId, start.toDate(), end.toDate()]
   );
 
-  const { secondsByDay } = computeDailyActivity(rows, cfg);
+  const { secondsByDay, segmentsByDay } = computeDailyActivity(rows, cfg);
 
   const daysInMonth = end.subtract(1, "day").date();
   let totalSeconds = 0;
   let rowsHtml = "";
+
+  const findNearestPosition = (dayRows, targetIso) => {
+    if (!dayRows.length) return null;
+    let best = null;
+    let bestDiff = Number.MAX_VALUE;
+    const target = dayjs(targetIso);
+    for (const r of dayRows) {
+      const diff = Math.abs(dayjs(r.fixtime).diff(target, "second"));
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = r;
+      }
+    }
+    return best;
+  };
 
   for (let d = 1; d <= daysInMonth; d++) {
     const day = start.date(d).format("YYYY-MM-DD");
@@ -416,8 +433,20 @@ async function buildActivityReport(deviceId, month) {
     const width = Math.min(100, (sec / 86400) * 100);
 
     const dayRows = rows.filter((r) => dayjs(r.fixtime).format("YYYY-MM-DD") === day);
-    const startPos = dayRows[0];
-    const endPos = dayRows[dayRows.length - 1];
+    const segments = segmentsByDay.get(day) || [];
+
+    const firstSeg = segments[0];
+    const lastSeg = segments[segments.length - 1];
+
+    const startTimeIso = firstSeg
+      ? dayjs(day).startOf("day").add(firstSeg.start, "second").toISOString()
+      : null;
+    const endTimeIso = lastSeg
+      ? dayjs(day).startOf("day").add(lastSeg.end, "second").toISOString()
+      : null;
+
+    const startPos = startTimeIso ? findNearestPosition(dayRows, startTimeIso) : null;
+    const endPos = endTimeIso ? findNearestPosition(dayRows, endTimeIso) : null;
 
     const startAddress = startPos
       ? await resolveAddress(startPos.address, startPos.latitude, startPos.longitude)
@@ -426,16 +455,24 @@ async function buildActivityReport(deviceId, month) {
       ? await resolveAddress(endPos.address, endPos.latitude, endPos.longitude)
       : "-";
 
+    const timeline = segments
+      .map((s) => {
+        const left = (s.start / SECONDS_DAY) * 100;
+        const width = ((s.end - s.start) / SECONDS_DAY) * 100;
+        return `<span style="position:absolute; left:${left}%; width:${width}%; top:0; bottom:0; background:#2563eb;"></span>`;
+      })
+      .join("");
+
     rowsHtml += `<tr>
       <td>${day}</td>
-      <td>${startPos ? dayjs(startPos.fixtime).format("HH:mm") : "-"}</td>
+      <td>${startTimeIso ? dayjs(startTimeIso).format("HH:mm") : "-"}</td>
       <td>${startAddress}</td>
-      <td>${endPos ? dayjs(endPos.fixtime).format("HH:mm") : "-"}</td>
+      <td>${endTimeIso ? dayjs(endTimeIso).format("HH:mm") : "-"}</td>
       <td>${endAddress}</td>
       <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
       <td>
-        <div style="background:#f3f4f6; border:1px solid #e5e7eb; border-radius:8px; height:12px; position:relative; overflow:hidden;">
-          <div style="position:absolute; top:0; left:0; bottom:0; width:${width}%; background:#2563eb;"></div>
+        <div style="position:relative; height:12px; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;">
+          ${timeline || ""}
         </div>
       </td>
     </tr>`;
