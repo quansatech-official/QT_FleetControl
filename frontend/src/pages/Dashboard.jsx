@@ -274,29 +274,6 @@ export default function Dashboard() {
         <ExportView
           month={month}
           fleetActivity={fleetActivity}
-          search={search}
-          exportSelection={exportSelection}
-          setExportSelection={setExportSelection}
-          exporting={exporting}
-          exportError={exportError}
-          onExport={handleZipExport}
-        />
-      )}
-
-      {mode === "fahrzeuge" && (
-        <AllVehiclesView
-          month={month}
-          fleetActivity={fleetActivity}
-          fleetStatus={fleetStatus}
-          search={search}
-          onRefresh={refreshStatus}
-        />
-      )}
-
-      {mode === "export" && (
-        <ExportView
-          month={month}
-          fleetActivity={fleetActivity}
           fleetStatus={fleetStatus}
           search={search}
           exportSelection={exportSelection}
