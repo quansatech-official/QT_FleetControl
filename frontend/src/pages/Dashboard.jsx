@@ -276,6 +276,7 @@ export default function Dashboard() {
           month={month}
           fleetActivity={fleetActivity}
           fleetStatus={fleetStatus}
+          fleetAlerts={fleetAlerts}
           onRefresh={refreshStatus}
           search={search}
         />
@@ -313,7 +314,7 @@ export default function Dashboard() {
   );
 }
 
-function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) {
+function OverviewView({ month, fleetActivity, fleetStatus, fleetAlerts, onRefresh, search }) {
   const combined = useMemo(() => {
     const activityMap = new Map();
     (fleetActivity?.devices || []).forEach((d) => activityMap.set(d.deviceId, d));
