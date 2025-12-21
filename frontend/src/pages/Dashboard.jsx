@@ -11,7 +11,7 @@ export default function Dashboard() {
   /* =====================
      State
      ===================== */
-  const [mode, setMode] = useState("controlling"); // controlling | dispatcher | werkstatt
+  const [mode, setMode] = useState("controlling"); // controlling | overview | werkstatt
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState(null);
   const [month, setMonth] = useState(dayjs().format("YYYY-MM"));
@@ -21,6 +21,7 @@ export default function Dashboard() {
   const [fuel, setFuel] = useState(null);
   const [fleetActivity, setFleetActivity] = useState(null);
   const [fleetStatus, setFleetStatus] = useState([]);
+  const [exportSelection, setExportSelection] = useState([]);
 
   const [loading, setLoading] = useState(false);
   const [fleetLoading, setFleetLoading] = useState(false);
@@ -86,6 +87,10 @@ export default function Dashboard() {
     setFleetLoading(true);
     apiGet(`/fleet/activity?month=${month}`)
       .then((res) => setFleetActivity(res))
+      .then((res) => {
+        const ids = (res?.devices || []).map((d) => d.deviceId);
+        setExportSelection(ids);
+      })
       .catch((e) => {
         console.error(e);
         setError("Flottenübersicht konnte nicht geladen werden");
@@ -108,7 +113,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (mode === "dispatcher") {
+    if (mode === "overview") {
       refreshStatus();
     }
   }, [mode]);
@@ -138,7 +143,7 @@ export default function Dashboard() {
         {/* Modes */}
         <div style={{ display: "flex", gap: 8 }}>
           {[
-            { key: "dispatcher", label: "Dispatcher" },
+            { key: "overview", label: "Übersicht" },
             { key: "controlling", label: "Controlling" },
             { key: "werkstatt", label: "Werkstatt" }
           ].map((m) => (
@@ -169,7 +174,7 @@ export default function Dashboard() {
         />
 
         {/* Device selector */}
-        {mode !== "dispatcher" && (
+        {mode !== "overview" && (
           <select
             value={deviceId || ""}
             onChange={(e) => setDeviceId(Number(e.target.value))}
@@ -186,9 +191,9 @@ export default function Dashboard() {
         <MonthPicker month={month} setMonth={setMonth} />
 
         {/* PDF Export */}
-        {mode !== "dispatcher" && (
+        {mode !== "overview" && (
           <a href={pdfUrl} target="_blank" rel="noreferrer">
-            <button>PDF Monatsreport</button>
+            <button>PDF Fahrtenbuch (Monat)</button>
           </a>
         )}
 
@@ -213,8 +218,8 @@ export default function Dashboard() {
       )}
 
       {/* ===== Content per Mode ===== */}
-      {mode === "dispatcher" && (
-        <DispatcherView
+      {mode === "overview" && (
+        <OverviewView
           month={month}
           fleetActivity={fleetActivity}
           fleetStatus={fleetStatus}
@@ -230,6 +235,8 @@ export default function Dashboard() {
           fuel={fuel}
           fleetActivity={fleetActivity}
           search={search}
+          exportSelection={exportSelection}
+          setExportSelection={setExportSelection}
         />
       )}
 
@@ -252,7 +259,7 @@ export default function Dashboard() {
   );
 }
 
-function DispatcherView({ month, fleetActivity, fleetStatus, onRefresh, search }) {
+function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) {
   const filteredStatus = useMemo(() => {
     const term = search.trim().toLowerCase();
     if (!term) return fleetStatus || [];
@@ -265,7 +272,7 @@ function DispatcherView({ month, fleetActivity, fleetStatus, onRefresh, search }
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <strong>Dispatcher-Board</strong>
+        <strong>Flotten-Übersicht</strong>
         <span style={{ color: "#666" }}>Live-Liste + Schnellkalkulation</span>
         <button onClick={onRefresh}>Refresh</button>
       </div>
@@ -335,7 +342,17 @@ function DispatcherView({ month, fleetActivity, fleetStatus, onRefresh, search }
   );
 }
 
-function ControllingView({ month, activity, fuel, fleetActivity, search }) {
+function ControllingView({
+  month,
+  activity,
+  fuel,
+  fleetActivity,
+  search,
+  exportSelection,
+  setExportSelection
+}) {
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const fleetDevices = useMemo(() => {
     const list = fleetActivity?.devices || [];
     const term = search.trim().toLowerCase();
@@ -344,6 +361,60 @@ function ControllingView({ month, activity, fuel, fleetActivity, search }) {
   }, [fleetActivity, search]);
 
   const totalHours = (fleetActivity?.totals?.activeSeconds || 0) / 3600;
+
+  useEffect(() => {
+    if (!fleetDevices.length) return;
+    // Keep only selections present in filtered devices; if empty, default to all filtered.
+    const filteredIds = new Set(fleetDevices.map((d) => d.deviceId));
+    const kept = exportSelection.filter((id) => filteredIds.has(id));
+    if (kept.length) {
+      setExportSelection(kept);
+    } else {
+      setExportSelection(Array.from(filteredIds));
+    }
+  }, [fleetDevices, exportSelection]);
+
+  const toggleDevice = (id) => {
+    if (exportSelection.includes(id)) {
+      setExportSelection(exportSelection.filter((x) => x !== id));
+    } else {
+      setExportSelection([...exportSelection, id]);
+    }
+  };
+
+  const toggleAll = () => {
+    const allIds = fleetDevices.map((d) => d.deviceId);
+    setExportSelection(allIds);
+  };
+
+  const handleExport = async () => {
+    if (!exportSelection.length) {
+      setExportError("Bitte mindestens ein Fahrzeug wählen.");
+      return;
+    }
+    setExportError("");
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ month });
+      params.set("deviceIds", exportSelection.join(","));
+      const resp = await fetch(`${API_BASE}/reports/activity.zip?${params.toString()}`);
+      if (!resp.ok) throw new Error("export_failed");
+      const blob = await resp.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Fahrtenbuch_${month}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      setExportError("Export fehlgeschlagen");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -384,6 +455,49 @@ function ControllingView({ month, activity, fuel, fleetActivity, search }) {
               <div style={{ color: "#666", fontSize: 12 }}>Keine Daten</div>
             )}
           </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 12,
+          padding: 12,
+          display: "grid",
+          gap: 10,
+          background: "#fff"
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0 }}>Fahrtenbuch Export (ZIP)</h3>
+          <button onClick={toggleAll}>Alle auswählen</button>
+        </div>
+        <div style={{ fontSize: 13, color: "#475569" }}>
+          Monat {month} · Generiert ein ZIP mit PDF pro Fahrzeug. Ideal für Buchhaltung (40+ LKW).
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 6 }}>
+          {fleetDevices.map((d) => (
+            <label key={d.deviceId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid #e5e7eb", borderRadius: 10 }}>
+              <input
+                type="checkbox"
+                checked={exportSelection.includes(d.deviceId)}
+                onChange={() => toggleDevice(d.deviceId)}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", width: "100%", gap: 8 }}>
+                <span>{d.name}</span>
+                <span style={{ fontVariantNumeric: "tabular-nums", color: "#475569" }}>
+                  {(d.activeSeconds / 3600).toFixed(1)} h
+                </span>
+              </div>
+            </label>
+          ))}
+          {!fleetDevices.length && <div style={{ color: "#666", fontSize: 12 }}>Keine Fahrzeuge</div>}
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button onClick={handleExport} disabled={exporting}>
+            {exporting ? "Export läuft…" : "ZIP exportieren"}
+          </button>
+          {exportError && <span style={{ color: "#b91c1c", fontSize: 13 }}>{exportError}</span>}
         </div>
       </div>
 

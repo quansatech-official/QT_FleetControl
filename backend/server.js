@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import archiver from "archiver";
 import dayjs from "dayjs";
 
 import { createPoolFromEnv } from "./db.js";
@@ -264,6 +265,105 @@ app.get("/api/fleet/status", async (_req, res) => {
   }
 });
 
+async function buildActivityReport(deviceId, month) {
+  const start = dayjs(`${month}-01`).startOf("month");
+  const end = start.add(1, "month");
+
+  const [[device]] = await pool.query(
+    `SELECT id, name FROM ${tbl("devices")} WHERE id = ?`,
+    [deviceId]
+  );
+
+  if (!device) throw new Error("device_not_found");
+
+  const [rows] = await pool.query(
+    `SELECT fixtime, speed
+     FROM ${tbl("positions")}
+     WHERE deviceid = ? AND fixtime >= ? AND fixtime < ?
+     ORDER BY fixtime ASC`,
+    [deviceId, start.toDate(), end.toDate()]
+  );
+
+  const { secondsByDay } = computeDailyActivity(rows, cfg);
+
+  const daysInMonth = end.subtract(1, "day").date();
+  let totalSeconds = 0;
+  let rowsHtml = "";
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const day = start.date(d).format("YYYY-MM-DD");
+    const sec = secondsByDay.get(day) || 0;
+    totalSeconds += sec;
+    const hours = (sec / 3600).toFixed(2);
+    const width = Math.min(100, (sec / 86400) * 100);
+    rowsHtml += `<tr>
+      <td>${day}</td>
+      <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
+      <td>
+        <div style="background:#f3f4f6; border:1px solid #e5e7eb; border-radius:8px; height:12px; position:relative; overflow:hidden;">
+          <div style="position:absolute; top:0; left:0; bottom:0; width:${width}%; background:#2563eb;"></div>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  const totalHours = (totalSeconds / 3600).toFixed(2);
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 12px; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    .meta { margin-bottom: 12px; }
+    .badge { display:inline-block; padding:4px 8px; border:1px solid #ddd; border-radius:999px; margin-right:6px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { border-bottom:1px solid #eee; padding:6px 4px; vertical-align:middle; }
+    th { background:#fafafa; text-align:left; }
+    .right { text-align:right; }
+    .footer { margin-top:12px; color:#666; font-size:10px; }
+  </style>
+</head>
+<body>
+  <h1>QT FleetControl – Fahrtenbuch Monatsreport</h1>
+  <div class="meta">
+    <span class="badge">Fahrzeug: ${device?.name || deviceId}</span>
+    <span class="badge">Monat: ${month}</span>
+    <span class="badge">Gültig: Fahrtenbuch AT</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Tag</th><th class="right">Aktive Zeit (h)</th><th>Balken</th></tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+    <tfoot>
+      <tr><th>Summe</th><th class="right">${totalHours}</th><th></th></tr>
+    </tfoot>
+  </table>
+
+  <div class="footer">
+    Messbasis: Traccar Telemetrie (OBD). Österreich-konformes Fahrtenbuch (Monatsansicht).<br/>
+    Parameter: minSpeed=${cfg.minSpeedKmh} km/h,
+    stopTolerance=${cfg.stopToleranceSec}s,
+    minBlock=${cfg.minMovingSeconds}s
+  </div>
+</body>
+</html>
+`;
+
+  const pdf = await renderPdfFromHtml(html);
+  const filename = `QT_FleetControl_Activity_${device?.name || deviceId}_${month}.pdf`.replace(
+    /\s+/g,
+    "_"
+  );
+  return { pdf, filename };
+}
+
 /* =======================
    PDF – Activity Monat
    ======================= */
@@ -276,94 +376,71 @@ app.get("/api/reports/activity.pdf", async (req, res) => {
   }
 
   try {
-    const start = dayjs(`${month}-01`).startOf("month");
-    const end = start.add(1, "month");
-
-    const [[device]] = await pool.query(
-      `SELECT id, name FROM ${tbl("devices")} WHERE id = ?`,
-      [deviceId]
-    );
-
-    const [rows] = await pool.query(
-      `SELECT fixtime, speed
-       FROM ${tbl("positions")}
-       WHERE deviceid = ? AND fixtime >= ? AND fixtime < ?
-       ORDER BY fixtime ASC`,
-      [deviceId, start.toDate(), end.toDate()]
-    );
-
-    const { secondsByDay } = computeDailyActivity(rows, cfg);
-
-    const daysInMonth = end.subtract(1, "day").date();
-    let totalSeconds = 0;
-    let rowsHtml = "";
-
-    for (let d = 1; d <= daysInMonth; d++) {
-      const day = start.date(d).format("YYYY-MM-DD");
-      const sec = secondsByDay.get(day) || 0;
-      totalSeconds += sec;
-      const hours = (sec / 3600).toFixed(2);
-      rowsHtml += `<tr><td>${day}</td><td style="text-align:right">${hours}</td></tr>`;
-    }
-
-    const totalHours = (totalSeconds / 3600).toFixed(2);
-
-    const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <style>
-    body { font-family: Arial, sans-serif; font-size: 12px; }
-    h1 { font-size: 18px; margin: 0 0 8px; }
-    .meta { margin-bottom: 12px; }
-    .badge { display:inline-block; padding:4px 8px; border:1px solid #ddd; border-radius:999px; margin-right:6px; }
-    table { width:100%; border-collapse: collapse; }
-    th, td { border-bottom:1px solid #eee; padding:6px 4px; }
-    th { background:#fafafa; text-align:left; }
-    .right { text-align:right; }
-    .footer { margin-top:12px; color:#666; font-size:10px; }
-  </style>
-</head>
-<body>
-  <h1>QT FleetControl – Activity Report</h1>
-  <div class="meta">
-    <span class="badge">Fahrzeug: ${device?.name || deviceId}</span>
-    <span class="badge">Monat: ${month}</span>
-  </div>
-
-  <table>
-    <thead>
-      <tr><th>Tag</th><th class="right">Aktive Zeit (h)</th></tr>
-    </thead>
-    <tbody>
-      ${rowsHtml}
-    </tbody>
-    <tfoot>
-      <tr><th>Summe</th><th class="right">${totalHours}</th></tr>
-    </tfoot>
-  </table>
-
-  <div class="footer">
-    Messbasis: Traccar Telemetrie (OBD).<br/>
-    Parameter: minSpeed=${cfg.minSpeedKmh} km/h,
-    stopTolerance=${cfg.stopToleranceSec}s,
-    minBlock=${cfg.minMovingSeconds}s
-  </div>
-</body>
-</html>
-`;
-
-    const pdf = await renderPdfFromHtml(html);
+    const { pdf, filename } = await buildActivityReport(deviceId, month);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
-      `inline; filename="QT_FleetControl_Activity_${deviceId}_${month}.pdf"`
+      `inline; filename="${filename}"`
     );
     res.end(pdf);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "pdf_failed" });
+  }
+});
+
+/* =======================
+   ZIP – Activity Monat (Bulk Export)
+   ======================= */
+app.get("/api/reports/activity.zip", async (req, res) => {
+  const month = String(req.query.month || dayjs().format("YYYY-MM"));
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ error: "month required (YYYY-MM)" });
+  }
+
+  let deviceIds = String(req.query.deviceIds || "")
+    .split(",")
+    .map((id) => Number(id))
+    .filter((n) => Number.isFinite(n));
+
+  try {
+    if (!deviceIds.length) {
+      const [rows] = await pool.query(
+        `SELECT id FROM ${tbl("devices")} WHERE disabled = 0 ORDER BY name`
+      );
+      deviceIds = rows.map((r) => r.id);
+    }
+
+    if (!deviceIds.length) {
+      return res.status(400).json({ error: "no_devices" });
+    }
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="QT_FleetControl_Activity_${month}.zip"`
+    );
+
+    const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.on("error", (err) => {
+      console.error(err);
+      res.status(500).end();
+    });
+    archive.pipe(res);
+
+    for (const id of deviceIds) {
+      try {
+        const { pdf, filename } = await buildActivityReport(id, month);
+        archive.append(pdf, { name: filename });
+      } catch (err) {
+        console.error(`bulk_pdf_failed device=${id}`, err);
+      }
+    }
+
+    archive.finalize();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "bulk_pdf_failed" });
   }
 });
 
