@@ -11,7 +11,7 @@ export default function Dashboard() {
   /* =====================
      State
      ===================== */
-  const [mode, setMode] = useState("controlling"); // controlling | overview | export
+  const [mode, setMode] = useState("overview"); // controlling | overview | export
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState(null);
   const [month, setMonth] = useState(dayjs().format("YYYY-MM"));
@@ -88,8 +88,8 @@ export default function Dashboard() {
   useEffect(() => {
     setFleetLoading(true);
     apiGet(`/fleet/activity?month=${month}`)
-      .then((res) => setFleetActivity(res))
       .then((res) => {
+        setFleetActivity(res);
         const ids = (res?.devices || []).map((d) => d.deviceId);
         setExportSelection(ids);
       })
@@ -115,7 +115,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (mode === "overview") {
+    if (mode === "overview" || mode === "export") {
       refreshStatus();
     }
   }, [mode]);

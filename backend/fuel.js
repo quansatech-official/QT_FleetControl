@@ -17,11 +17,13 @@ export function extractFuelValue(attributes, keys) {
   if (attributes === null || attributes === undefined) return null;
 
   let obj = attributes;
-  if (typeof attributes === "string") {
+  if (Buffer.isBuffer(attributes)) {
+    obj = attributes.toString("utf8");
+  }
+  if (typeof obj === "string") {
     try {
-      obj = JSON.parse(attributes);
+      obj = JSON.parse(obj);
     } catch {
-      // Traccar kann auch mal "null" oder kaputtes JSON liefern – dann brechen wir hier ab.
       return null;
     }
   }
