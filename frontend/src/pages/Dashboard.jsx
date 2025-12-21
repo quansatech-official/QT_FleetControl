@@ -11,7 +11,7 @@ export default function Dashboard() {
   /* =====================
      State
      ===================== */
-  const [mode, setMode] = useState("controlling"); // controlling | overview | werkstatt | fahrzeuge
+  const [mode, setMode] = useState("controlling"); // controlling | overview
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState(null);
   const [month, setMonth] = useState(dayjs().format("YYYY-MM"));
@@ -115,7 +115,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (mode === "overview" || mode === "fahrzeuge") {
+    if (mode === "overview") {
       refreshStatus();
     }
   }, [mode]);
@@ -175,8 +175,7 @@ export default function Dashboard() {
         <div style={{ display: "flex", gap: 8 }}>
           {[
             { key: "overview", label: "Übersicht" },
-            { key: "controlling", label: "Controlling" },
-            { key: "fahrzeuge", label: "Fahrzeuge (alle)" }
+            { key: "controlling", label: "Controlling" }
           ].map((m) => (
             <button
               key={m.key}
@@ -205,7 +204,7 @@ export default function Dashboard() {
         />
 
         {/* Device selector */}
-        {mode !== "overview" && mode !== "fahrzeuge" && (
+        {mode !== "overview" && (
           <select
             value={deviceId || ""}
             onChange={(e) => setDeviceId(Number(e.target.value))}
@@ -271,6 +270,7 @@ export default function Dashboard() {
           exporting={exporting}
           exportError={exportError}
           onExport={handleZipExport}
+          deviceName={filteredDevices.find((d) => d.id === deviceId)?.name || ""}
         />
       )}
 
@@ -294,14 +294,25 @@ export default function Dashboard() {
 }
 
 function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) {
-  const filteredStatus = useMemo(() => {
+  const combined = useMemo(() => {
+    const activityMap = new Map();
+    (fleetActivity?.devices || []).forEach((d) => activityMap.set(d.deviceId, d));
     const term = search.trim().toLowerCase();
-    if (!term) return fleetStatus || [];
-    return (fleetStatus || []).filter((d) => d.name.toLowerCase().includes(term));
-  }, [fleetStatus, search]);
+    return (fleetStatus || [])
+      .map((s) => {
+        const activity = activityMap.get(s.deviceId);
+        return {
+          ...s,
+          activeSeconds: activity?.activeSeconds || 0,
+          daysActive: activity?.daysActive || 0
+        };
+      })
+      .filter((d) => (term ? d.name.toLowerCase().includes(term) : true))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [fleetStatus, fleetActivity, search]);
 
-  const moving = filteredStatus.filter((d) => d.speed >= 5);
-  const idle = filteredStatus.length - moving.length;
+  const moving = combined.filter((d) => d.speed >= 5);
+  const idle = combined.length - moving.length;
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -331,7 +342,7 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
 
       <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ margin: 0 }}>Live-Status (alle)</h3>
+          <h3 style={{ margin: 0 }}>Live-Status & Aktivität (alle)</h3>
           <small style={{ color: "#666" }}>Sortiert nach Name</small>
         </div>
         <div style={{ overflowX: "auto" }}>
@@ -343,87 +354,6 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
                 <th style={{ padding: 6 }}>Speed</th>
                 <th style={{ padding: 6 }}>Tank</th>
                 <th style={{ padding: 6 }}>Alarme</th>
-                <th style={{ padding: 6 }}>Letzte Meldung</th>
-                <th style={{ padding: 6 }}>Ort</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredStatus.map((d) => (
-                <tr key={d.deviceId} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                  <td style={{ padding: 6 }}>{d.name}</td>
-                  <td style={{ padding: 6, color: d.speed >= 5 ? "#0f766e" : "#475569" }}>
-                    {d.speed >= 5 ? "Fahrt" : "Stand"}
-                  </td>
-                  <td style={{ padding: 6 }}>{d.speed?.toFixed(1)} km/h</td>
-                  <td style={{ padding: 6 }}>{d.fuel !== null ? `${d.fuel}` : "-"}</td>
-                  <td style={{ padding: 6 }}>
-                    {d.fuelAlert ? (
-                      <span style={{ color: "#b91c1c", fontWeight: 700 }}>Tankabfall</span>
-                    ) : d.fuelError ? (
-                      <span style={{ color: "#d97706" }}>kein Tankwert</span>
-                    ) : (
-                      <span style={{ color: "#16a34a" }}>OK</span>
-                    )}
-                  </td>
-                  <td style={{ padding: 6 }}>
-                    {d.lastFix ? new Date(d.lastFix).toLocaleString() : "–"}
-                  </td>
-                  <td style={{ padding: 6 }}>
-                    {d.address ||
-                      (d.latitude && d.longitude
-                        ? `${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`
-                        : "–")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!filteredStatus.length && (
-            <div style={{ padding: 8, color: "#666" }}>Keine Fahrzeuge gefunden.</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AllVehiclesView({ month, fleetActivity, fleetStatus, search, onRefresh }) {
-  const combined = useMemo(() => {
-    const activityMap = new Map();
-    (fleetActivity?.devices || []).forEach((d) => activityMap.set(d.deviceId, d));
-
-    const term = search.trim().toLowerCase();
-    const list = (fleetStatus || []).map((s) => {
-      const activity = activityMap.get(s.deviceId);
-      return {
-        ...s,
-        activeSeconds: activity?.activeSeconds || 0,
-        daysActive: activity?.daysActive || 0
-      };
-    });
-
-    return list
-      .filter((d) => (term ? d.name.toLowerCase().includes(term) : true))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [fleetStatus, fleetActivity, search]);
-
-  return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <strong>Fahrzeuge (alle)</strong>
-        <span style={{ color: "#666" }}>Monat {month}</span>
-        <button onClick={onRefresh}>Live-Daten aktualisieren</button>
-      </div>
-
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid #eee", textAlign: "left" }}>
-                <th style={{ padding: 6 }}>Fahrzeug</th>
-                <th style={{ padding: 6 }}>Status</th>
-                <th style={{ padding: 6 }}>Tank</th>
-                <th style={{ padding: 6 }}>Alarm</th>
                 <th style={{ padding: 6 }}>Aktive Std.</th>
                 <th style={{ padding: 6 }}>Tage aktiv</th>
                 <th style={{ padding: 6 }}>Letzte Meldung</th>
@@ -432,12 +362,13 @@ function AllVehiclesView({ month, fleetActivity, fleetStatus, search, onRefresh 
             </thead>
             <tbody>
               {combined.map((d) => (
-                <tr key={d.deviceId} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                <tr key={d.deviceId} style={{ borderBottom: "1px solid " + (d.fuelAlert ? "#fecdd3" : "#f3f4f6") }}>
                   <td style={{ padding: 6 }}>{d.name}</td>
                   <td style={{ padding: 6, color: d.speed >= 5 ? "#0f766e" : "#475569" }}>
-                    {d.speed >= 5 ? "Fahrt" : "Stand"} ({d.speed?.toFixed(1)} km/h)
+                    {d.speed >= 5 ? "Fahrt" : "Stand"}
                   </td>
-                  <td style={{ padding: 6 }}>{d.fuel !== null ? d.fuel : "-"}</td>
+                  <td style={{ padding: 6 }}>{d.speed?.toFixed(1)} km/h</td>
+                  <td style={{ padding: 6 }}>{d.fuel !== null ? `${d.fuel}` : "-"}</td>
                   <td style={{ padding: 6 }}>
                     {d.fuelAlert ? (
                       <span style={{ color: "#b91c1c", fontWeight: 700 }}>Tankabfall</span>
@@ -483,7 +414,8 @@ function ControllingView({
   setExportSelection,
   exporting,
   exportError,
-  onExport
+  onExport,
+  deviceName
 }) {
   const fleetDevices = useMemo(() => {
     const list = fleetActivity?.devices || [];
@@ -630,6 +562,42 @@ function ControllingView({
         <div style={{ display: "grid", gap: 16 }}>
           <FuelCard fuel={fuel?.latest || null} />
           <AlertsCard alerts={fuel?.alerts || []} />
+        </div>
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #eee",
+          borderRadius: 12,
+          padding: 12,
+          background: "#fff"
+        }}
+      >
+        <h3 style={{ marginTop: 0 }}>Fahrzeug-Dashboard {deviceName ? `– ${deviceName}` : ""}</h3>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 12
+          }}
+        >
+          <MetricCard
+            label="Aktive Stunden (Monat)"
+            value={(activity?.days?.reduce((acc, d) => acc + (d.activeSeconds || 0), 0) / 3600 || 0).toFixed(1)}
+          />
+          <MetricCard
+            label="Tage mit Fahrt"
+            value={activity?.days?.filter((d) => (d.activeSeconds || 0) > 0).length || 0}
+          />
+          <MetricCard
+            label="Letzter Tankwert"
+            value={fuel?.latest ? `${fuel.latest.fuel}` : "–"}
+            hint={fuel?.latest ? new Date(fuel.latest.time).toLocaleString() : ""}
+          />
+          <MetricCard
+            label="Tank-Alarme"
+            value={fuel?.alerts?.length || 0}
+          />
         </div>
       </div>
 
