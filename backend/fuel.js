@@ -47,10 +47,31 @@ export function detectFuelDrops(series, cfg) {
       (drop / series[i - 1].fuel) * 100 >= cfg.fuelDropPercent
     ) {
       alerts.push({
+        type: "drop",
         time: series[i].time,
         from: series[i - 1].fuel,
         to: series[i].fuel,
-        drop
+        delta: -drop
+      });
+    }
+  }
+  return alerts;
+}
+
+export function detectFuelRefuels(series, cfg) {
+  const alerts = [];
+  for (let i = 1; i < series.length; i++) {
+    const rise = series[i].fuel - series[i - 1].fuel;
+    if (
+      rise >= cfg.refuelLiters ||
+      (rise / series[i - 1].fuel) * 100 >= cfg.refuelPercent
+    ) {
+      alerts.push({
+        type: "refuel",
+        time: series[i].time,
+        from: series[i - 1].fuel,
+        to: series[i].fuel,
+        delta: rise
       });
     }
   }

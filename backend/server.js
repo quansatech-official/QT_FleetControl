@@ -5,7 +5,7 @@ import dayjs from "dayjs";
 
 import { createPoolFromEnv } from "./db.js";
 import { computeDailyActivity } from "./activity.js";
-import { extractFuelValue, detectFuelDrops } from "./fuel.js";
+import { extractFuelValue, detectFuelDrops, detectFuelRefuels } from "./fuel.js";
 import { renderPdfFromHtml } from "./pdf.js";
 
 const SECONDS_DAY = 24 * 3600;
@@ -50,6 +50,8 @@ const cfg = {
   fuelDropLiters: Number(process.env.FUEL_DROP_LITERS || 10),
   fuelDropPercent: Number(process.env.FUEL_DROP_PERCENT || 8),
   fuelWindowMinutes: Number(process.env.FUEL_WINDOW_MINUTES || 10),
+  refuelLiters: Number(process.env.FUEL_REFUEL_LITERS || 15),
+  refuelPercent: Number(process.env.FUEL_REFUEL_PERCENT || 10),
   geocodeUrl: process.env.GEOCODE_URL || "https://nominatim.openstreetmap.org/reverse",
 };
 
@@ -165,8 +167,12 @@ app.get("/api/fuel/month", async (req, res) => {
       dropPercent: cfg.fuelDropPercent,
       windowMinutes: cfg.fuelWindowMinutes
     });
+    const refuels = detectFuelRefuels(series, {
+      refuelLiters: cfg.refuelLiters,
+      refuelPercent: cfg.refuelPercent
+    });
 
-    res.json({ deviceId, month, latest, series, alerts });
+    res.json({ deviceId, month, latest, series, alerts: [...alerts, ...refuels].sort((a, b) => a.time.localeCompare(b.time)) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "fuel_failed" });
@@ -304,7 +310,12 @@ app.get("/api/fleet/status", async (_req, res) => {
           dropPercent: cfg.fuelDropPercent,
           windowMinutes: cfg.fuelWindowMinutes
         });
-        if (alerts.length) fuelAlert = alerts[alerts.length - 1];
+        const refuels = detectFuelRefuels(series, {
+          refuelLiters: cfg.refuelLiters,
+          refuelPercent: cfg.refuelPercent
+        });
+        const combinedAlerts = [...alerts, ...refuels].sort((a, b) => a.time.localeCompare(b.time));
+        if (combinedAlerts.length) fuelAlert = combinedAlerts[combinedAlerts.length - 1];
       } catch (err) {
         console.error("fuel_alert_detect_failed", err);
       }

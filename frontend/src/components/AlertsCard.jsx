@@ -16,12 +16,14 @@ export default function AlertsCard({ alerts }) {
                 padding: 8
               }}
             >
-              <div style={{ fontWeight: 700 }}>Fuel Drop</div>
+              <div style={{ fontWeight: 700 }}>
+                {a.type === "refuel" ? "Betankung" : "Tankverlust"}
+              </div>
               <div style={{ fontSize: 12, color: "#666" }}>
                 {new Date(a.time).toLocaleString()}
               </div>
               <div style={{ fontSize: 12 }}>
-                von {a.from} → {a.to} (Δ {Math.round(a.drop * 100) / 100})
+                von {a.from} → {a.to} (Δ {Math.round(a.delta * 100) / 100})
               </div>
             </div>
           ))}
