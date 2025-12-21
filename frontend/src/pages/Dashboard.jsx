@@ -266,11 +266,6 @@ export default function Dashboard() {
           fuel={fuel}
           fleetActivity={fleetActivity}
           search={search}
-          exportSelection={exportSelection}
-          setExportSelection={setExportSelection}
-          exporting={exporting}
-          exportError={exportError}
-          onExport={handleZipExport}
           deviceName={filteredDevices.find((d) => d.id === deviceId)?.name || ""}
         />
       )}
@@ -438,11 +433,6 @@ function ControllingView({
   fuel,
   fleetActivity,
   search,
-  exportSelection,
-  setExportSelection,
-  exporting,
-  exportError,
-  onExport,
   deviceName
 }) {
   const fleetDevices = useMemo(() => {
@@ -453,31 +443,6 @@ function ControllingView({
   }, [fleetActivity, search]);
 
   const totalHours = (fleetActivity?.totals?.activeSeconds || 0) / 3600;
-
-  useEffect(() => {
-    if (!fleetDevices.length) return;
-    // Keep only selections present in filtered devices; if empty, default to all filtered.
-    const filteredIds = new Set(fleetDevices.map((d) => d.deviceId));
-    const kept = exportSelection.filter((id) => filteredIds.has(id));
-    if (kept.length) {
-      setExportSelection(kept);
-    } else {
-      setExportSelection(Array.from(filteredIds));
-    }
-  }, [fleetDevices, exportSelection]);
-
-  const toggleDevice = (id) => {
-    if (exportSelection.includes(id)) {
-      setExportSelection(exportSelection.filter((x) => x !== id));
-    } else {
-      setExportSelection([...exportSelection, id]);
-    }
-  };
-
-  const toggleAll = () => {
-    const allIds = fleetDevices.map((d) => d.deviceId);
-    setExportSelection(allIds);
-  };
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
@@ -526,41 +491,34 @@ function ControllingView({
           border: "1px solid #e5e7eb",
           borderRadius: 12,
           padding: 12,
-          display: "grid",
-          gap: 10,
           background: "#fff"
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ margin: 0 }}>Fahrtenbuch Export (ZIP)</h3>
-          <button onClick={toggleAll}>Alle auswählen</button>
-        </div>
-        <div style={{ fontSize: 13, color: "#475569" }}>
-          Monat {month} · Generiert ein ZIP mit PDF pro Fahrzeug. Ideal für Buchhaltung (40+ LKW).
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 6 }}>
-          {fleetDevices.map((d) => (
-            <label key={d.deviceId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: "1px solid #e5e7eb", borderRadius: 10 }}>
-              <input
-                type="checkbox"
-                checked={exportSelection.includes(d.deviceId)}
-                onChange={() => toggleDevice(d.deviceId)}
-              />
-              <div style={{ display: "flex", justifyContent: "space-between", width: "100%", gap: 8 }}>
-                <span>{d.name}</span>
-                <span style={{ fontVariantNumeric: "tabular-nums", color: "#475569" }}>
-                  {(d.activeSeconds / 3600).toFixed(1)} h
-                </span>
-              </div>
-            </label>
-          ))}
-          {!fleetDevices.length && <div style={{ color: "#666", fontSize: 12 }}>Keine Fahrzeuge</div>}
-        </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button onClick={onExport} disabled={exporting}>
-            {exporting ? "Export läuft…" : "ZIP exportieren"}
-          </button>
-          {exportError && <span style={{ color: "#b91c1c", fontSize: 13 }}>{exportError}</span>}
+        <h3 style={{ marginTop: 0 }}>Flottenübersicht – Stunden/Monat</h3>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ textAlign: "left", borderBottom: "1px solid #eee" }}>
+                <th style={{ padding: 6 }}>Fahrzeug</th>
+                <th style={{ padding: 6 }}>Aktive Stunden</th>
+                <th style={{ padding: 6 }}>Tage mit Fahrt</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fleetDevices.map((d) => (
+                <tr key={d.deviceId} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 6 }}>{d.name}</td>
+                  <td style={{ padding: 6, fontVariantNumeric: "tabular-nums" }}>
+                    {(d.activeSeconds / 3600).toFixed(1)} h
+                  </td>
+                  <td style={{ padding: 6 }}>{d.daysActive}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!fleetDevices.length && (
+            <div style={{ padding: 8, color: "#666" }}>Keine Fahrzeuge gefunden.</div>
+          )}
         </div>
       </div>
 

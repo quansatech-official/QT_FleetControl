@@ -408,6 +408,7 @@ async function buildActivityReport(deviceId, month) {
 
   const daysInMonth = end.subtract(1, "day").date();
   let totalSeconds = 0;
+  let totalDistanceKm = 0;
   let rowsHtml = "";
 
   const findNearestPosition = (dayRows, targetIso) => {
@@ -423,6 +424,26 @@ async function buildActivityReport(deviceId, month) {
       }
     }
     return best;
+  };
+
+  const distanceKm = (a, b) => {
+    if (
+      !Number.isFinite(a?.latitude) ||
+      !Number.isFinite(a?.longitude) ||
+      !Number.isFinite(b?.latitude) ||
+      !Number.isFinite(b?.longitude)
+    ) return 0;
+    const R = 6371; // km
+    const toRad = (x) => (x * Math.PI) / 180;
+    const dLat = toRad(b.latitude - a.latitude);
+    const dLon = toRad(b.longitude - a.longitude);
+    const lat1 = toRad(a.latitude);
+    const lat2 = toRad(b.latitude);
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    return R * c;
   };
 
   for (let d = 1; d <= daysInMonth; d++) {
@@ -450,6 +471,13 @@ async function buildActivityReport(deviceId, month) {
       ? await resolveAddress(endPos.address, endPos.latitude, endPos.longitude)
       : "-";
 
+    // Distanz pro Tag (ungefähr, Haversine zwischen Positionspunkten)
+    let dayDistance = 0;
+    for (let i = 1; i < dayRows.length; i++) {
+      dayDistance += distanceKm(dayRows[i - 1], dayRows[i]);
+    }
+    totalDistanceKm += dayDistance;
+
     const timeline = segments
       .map((s) => {
         const left = (s.start / SECONDS_DAY) * 100;
@@ -464,9 +492,10 @@ async function buildActivityReport(deviceId, month) {
       <td>${startAddress}</td>
       <td>${endTimeIso ? dayjs(endTimeIso).format("HH:mm") : "-"}</td>
       <td>${endAddress}</td>
+      <td style="text-align:right; font-variant-numeric: tabular-nums;">${dayDistance.toFixed(1)} km</td>
       <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
       <td>
-        <div style="position:relative; height:12px; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;">
+        <div style="position:relative; height:16px; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;">
           ${timeline || ""}
         </div>
       </td>
@@ -474,6 +503,7 @@ async function buildActivityReport(deviceId, month) {
   }
 
   const totalHours = (totalSeconds / 3600).toFixed(2);
+  const totalDistanceStr = totalDistanceKm.toFixed(1);
 
   const html = `
 <!DOCTYPE html>
@@ -508,6 +538,7 @@ async function buildActivityReport(deviceId, month) {
         <th>Start (Ort)</th>
         <th>Ende (Zeit)</th>
         <th>Ende (Ort)</th>
+        <th class="right">Distanz (km)</th>
         <th class="right">Aktive Zeit (h)</th>
         <th>Balken</th>
       </tr>
@@ -522,6 +553,7 @@ async function buildActivityReport(deviceId, month) {
         <th></th>
         <th></th>
         <th></th>
+        <th class="right">${totalDistanceStr}</th>
         <th class="right">${totalHours}</th>
         <th></th>
       </tr>
