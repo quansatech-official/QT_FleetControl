@@ -25,6 +25,7 @@ const cfg = {
   minSpeedKmh: Number(process.env.MIN_SPEED_KMH || 5),
   stopToleranceSec: Number(process.env.STOP_TOLERANCE_SEC || 120),
   minMovingSeconds: Number(process.env.MIN_MOVING_SECONDS || 60),
+  detailGapSeconds: Number(process.env.DETAIL_GAP_SECONDS || 600), // Segmente enger als dieser Wert werden im Detailreport zusammengelegt
 
   fuelKeys: (process.env.FUEL_JSON_KEY || "fuel,fuel.level,io48,io[48],attributes.io48")
     .split(",")
@@ -451,6 +452,23 @@ async function buildActivityReport(deviceId, month, opts = {}) {
 
   const segmentRows = [];
 
+  const mergeSegments = (segments, gapSec) => {
+    if (!segments.length) return [];
+    const out = [];
+    let cur = { ...segments[0] };
+    for (let i = 1; i < segments.length; i++) {
+      const s = segments[i];
+      if (s.start - cur.end <= gapSec) {
+        cur.end = s.end;
+      } else {
+        out.push(cur);
+        cur = { ...s };
+      }
+    }
+    out.push(cur);
+    return out;
+  };
+
   for (let d = 1; d <= daysInMonth; d++) {
     const day = start.date(d).format("YYYY-MM-DD");
     const sec = secondsByDay.get(day) || 0;
@@ -459,7 +477,8 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     const width = Math.min(100, (sec / 86400) * 100);
 
     const dayRows = rows.filter((r) => dayjs(r.fixtime).format("YYYY-MM-DD") === day);
-    const segments = segmentsByDay.get(day) || [];
+    const segmentsRaw = segmentsByDay.get(day) || [];
+    const segments = opts.detail ? mergeSegments(segmentsRaw, cfg.detailGapSeconds) : segmentsRaw;
 
     // Start/End nach echter Fahrt (erstes/letztes Sample über Threshold)
     const movingRows = dayRows.filter((r) => Number(r.speed) >= cfg.minSpeedKmh);

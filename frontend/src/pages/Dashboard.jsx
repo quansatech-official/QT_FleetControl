@@ -327,35 +327,27 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <strong>Flotten-Übersicht</strong>
-        <span style={{ color: "#666" }}>Live-Liste + Schnellkalkulation</span>
-        <button onClick={onRefresh}>Refresh</button>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-        <MetricCard label="Fahrzeuge in Fahrt" value={moving.length} />
-        <MetricCard label="Im Stillstand" value={idle} />
-        <MetricCard
-          label="Ø aktive Stunden/Monat"
-          value={
-            fleetActivity?.devices?.length
-              ? (
-                  fleetActivity.devices.reduce((acc, d) => acc + d.activeSeconds, 0) /
-                  3600 /
-                  fleetActivity.devices.length
-                ).toFixed(1)
-              : "-"
-          }
-          hint={`Monat ${month}`}
-        />
-      </div>
-
-      <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ margin: 0 }}>Live-Status & Aktivität (alle)</h3>
-          <small style={{ color: "#666" }}>Sortiert nach Name</small>
+      <Section title="Flotten-Übersicht" icon="🚚" action={<button onClick={onRefresh}>Refresh</button>}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+          <MetricCard label="Fahrzeuge in Fahrt" value={moving.length} />
+          <MetricCard label="Im Stillstand" value={idle} />
+          <MetricCard
+            label="Ø aktive Stunden/Monat"
+            value={
+              fleetActivity?.devices?.length
+                ? (
+                    fleetActivity.devices.reduce((acc, d) => acc + d.activeSeconds, 0) /
+                    3600 /
+                    fleetActivity.devices.length
+                  ).toFixed(1)
+                : "-"
+            }
+            hint={`Monat ${month}`}
+          />
         </div>
+      </Section>
+
+      <Section title="Live-Status & Aktivität" icon="📡">
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
             <thead>
@@ -410,7 +402,7 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
             <div style={{ padding: 8, color: "#666" }}>Keine Fahrzeuge gefunden.</div>
           )}
         </div>
-      </div>
+      </Section>
     </div>
   );
 }
@@ -661,10 +653,7 @@ function ExportView({
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fff" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ margin: 0 }}>Fahrtenbuch Export (ZIP)</h3>
-          <button onClick={toggleAll}>Alle auswählen</button>
-        </div>
+        <SectionHeader title="Fahrtenbuch Export (ZIP)" icon="📦" action={<button onClick={toggleAll}>Alle auswählen</button>} />
         <div style={{ fontSize: 13, color: "#475569", marginTop: 4 }}>
           Monat {month} · Generiert ein ZIP mit PDF pro Fahrzeug.
         </div>
@@ -718,6 +707,51 @@ function MetricCard({ label, value, hint }) {
       <div style={{ fontSize: 12, color: "#666" }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
       {hint && <div style={{ fontSize: 12, color: "#94a3b8" }}>{hint}</div>}
+    </div>
+  );
+}
+
+function Section({ title, icon, action, children }) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: 14,
+        padding: 12,
+        background: "#fff",
+        boxShadow: "0 10px 30px rgba(0,0,0,0.04)",
+        display: "grid",
+        gap: 10
+      }}
+    >
+      <SectionHeader title={title} icon={icon} action={action} />
+      {children}
+    </div>
+  );
+}
+
+function SectionHeader({ title, icon, action }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {icon ? (
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              background: "#e0f2fe",
+              display: "grid",
+              placeItems: "center",
+              fontSize: 14
+            }}
+          >
+            {icon}
+          </div>
+        ) : null}
+        <h3 style={{ margin: 0 }}>{title}</h3>
+      </div>
+      {action ? <div>{action}</div> : null}
     </div>
   );
 }
