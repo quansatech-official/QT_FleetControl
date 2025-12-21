@@ -11,7 +11,7 @@ export default function Dashboard() {
   /* =====================
      State
      ===================== */
-  const [mode, setMode] = useState("controlling"); // controlling | overview | werkstatt
+  const [mode, setMode] = useState("controlling"); // controlling | overview | werkstatt | fahrzeuge
   const [devices, setDevices] = useState([]);
   const [deviceId, setDeviceId] = useState(null);
   const [month, setMonth] = useState(dayjs().format("YYYY-MM"));
@@ -113,7 +113,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    if (mode === "overview") {
+    if (mode === "overview" || mode === "fahrzeuge") {
       refreshStatus();
     }
   }, [mode]);
@@ -145,7 +145,8 @@ export default function Dashboard() {
           {[
             { key: "overview", label: "Übersicht" },
             { key: "controlling", label: "Controlling" },
-            { key: "werkstatt", label: "Werkstatt" }
+            { key: "werkstatt", label: "Werkstatt" },
+            { key: "fahrzeuge", label: "Fahrzeuge (alle)" }
           ].map((m) => (
             <button
               key={m.key}
@@ -174,7 +175,7 @@ export default function Dashboard() {
         />
 
         {/* Device selector */}
-        {mode !== "overview" && (
+        {mode !== "overview" && mode !== "fahrzeuge" && (
           <select
             value={deviceId || ""}
             onChange={(e) => setDeviceId(Number(e.target.value))}
@@ -191,7 +192,7 @@ export default function Dashboard() {
         <MonthPicker month={month} setMonth={setMonth} />
 
         {/* PDF Export */}
-        {mode !== "overview" && (
+        {mode !== "overview" && mode !== "fahrzeuge" && (
           <a href={pdfUrl} target="_blank" rel="noreferrer">
             <button>PDF Fahrtenbuch (Monat)</button>
           </a>
@@ -246,6 +247,16 @@ export default function Dashboard() {
           fuel={fuel}
           activity={activity}
           fleetStatus={fleetStatus}
+          onRefresh={refreshStatus}
+        />
+      )}
+
+      {mode === "fahrzeuge" && (
+        <AllVehiclesView
+          month={month}
+          fleetActivity={fleetActivity}
+          fleetStatus={fleetStatus}
+          search={search}
           onRefresh={refreshStatus}
         />
       )}
@@ -308,8 +319,9 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
                 <th style={{ padding: 6 }}>Status</th>
                 <th style={{ padding: 6 }}>Speed</th>
                 <th style={{ padding: 6 }}>Tank</th>
+                <th style={{ padding: 6 }}>Alarme</th>
                 <th style={{ padding: 6 }}>Letzte Meldung</th>
-                <th style={{ padding: 6 }}>Koordinaten</th>
+                <th style={{ padding: 6 }}>Ort</th>
               </tr>
             </thead>
             <tbody>
@@ -322,18 +334,114 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
                   <td style={{ padding: 6 }}>{d.speed?.toFixed(1)} km/h</td>
                   <td style={{ padding: 6 }}>{d.fuel !== null ? `${d.fuel}` : "-"}</td>
                   <td style={{ padding: 6 }}>
+                    {d.fuelAlert ? (
+                      <span style={{ color: "#b91c1c", fontWeight: 700 }}>Tankabfall</span>
+                    ) : d.fuelError ? (
+                      <span style={{ color: "#d97706" }}>kein Tankwert</span>
+                    ) : (
+                      <span style={{ color: "#16a34a" }}>OK</span>
+                    )}
+                  </td>
+                  <td style={{ padding: 6 }}>
                     {d.lastFix ? new Date(d.lastFix).toLocaleString() : "–"}
                   </td>
-                  <td style={{ padding: 6, fontVariantNumeric: "tabular-nums" }}>
-                    {d.latitude && d.longitude
-                      ? `${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`
-                      : "–"}
+                  <td style={{ padding: 6 }}>
+                    {d.address ||
+                      (d.latitude && d.longitude
+                        ? `${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`
+                        : "–")}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
           {!filteredStatus.length && (
+            <div style={{ padding: 8, color: "#666" }}>Keine Fahrzeuge gefunden.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AllVehiclesView({ month, fleetActivity, fleetStatus, search, onRefresh }) {
+  const combined = useMemo(() => {
+    const activityMap = new Map();
+    (fleetActivity?.devices || []).forEach((d) => activityMap.set(d.deviceId, d));
+
+    const term = search.trim().toLowerCase();
+    const list = (fleetStatus || []).map((s) => {
+      const activity = activityMap.get(s.deviceId);
+      return {
+        ...s,
+        activeSeconds: activity?.activeSeconds || 0,
+        daysActive: activity?.daysActive || 0
+      };
+    });
+
+    return list
+      .filter((d) => (term ? d.name.toLowerCase().includes(term) : true))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [fleetStatus, fleetActivity, search]);
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <strong>Fahrzeuge (alle)</strong>
+        <span style={{ color: "#666" }}>Monat {month}</span>
+        <button onClick={onRefresh}>Live-Daten aktualisieren</button>
+      </div>
+
+      <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid #eee", textAlign: "left" }}>
+                <th style={{ padding: 6 }}>Fahrzeug</th>
+                <th style={{ padding: 6 }}>Status</th>
+                <th style={{ padding: 6 }}>Tank</th>
+                <th style={{ padding: 6 }}>Alarm</th>
+                <th style={{ padding: 6 }}>Aktive Std.</th>
+                <th style={{ padding: 6 }}>Tage aktiv</th>
+                <th style={{ padding: 6 }}>Letzte Meldung</th>
+                <th style={{ padding: 6 }}>Ort</th>
+              </tr>
+            </thead>
+            <tbody>
+              {combined.map((d) => (
+                <tr key={d.deviceId} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                  <td style={{ padding: 6 }}>{d.name}</td>
+                  <td style={{ padding: 6, color: d.speed >= 5 ? "#0f766e" : "#475569" }}>
+                    {d.speed >= 5 ? "Fahrt" : "Stand"} ({d.speed?.toFixed(1)} km/h)
+                  </td>
+                  <td style={{ padding: 6 }}>{d.fuel !== null ? d.fuel : "-"}</td>
+                  <td style={{ padding: 6 }}>
+                    {d.fuelAlert ? (
+                      <span style={{ color: "#b91c1c", fontWeight: 700 }}>Tankabfall</span>
+                    ) : d.fuelError ? (
+                      <span style={{ color: "#d97706" }}>kein Tankwert</span>
+                    ) : (
+                      <span style={{ color: "#16a34a" }}>OK</span>
+                    )}
+                  </td>
+                  <td style={{ padding: 6, fontVariantNumeric: "tabular-nums" }}>
+                    {(d.activeSeconds / 3600).toFixed(1)} h
+                  </td>
+                  <td style={{ padding: 6 }}>{d.daysActive}</td>
+                  <td style={{ padding: 6 }}>
+                    {d.lastFix ? new Date(d.lastFix).toLocaleString() : "–"}
+                  </td>
+                  <td style={{ padding: 6 }}>
+                    {d.address ||
+                      (d.latitude && d.longitude
+                        ? `${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`
+                        : "–")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!combined.length && (
             <div style={{ padding: 8, color: "#666" }}>Keine Fahrzeuge gefunden.</div>
           )}
         </div>

@@ -224,7 +224,7 @@ app.get("/api/fleet/activity", async (req, res) => {
 app.get("/api/fleet/status", async (_req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT d.id AS deviceId, d.name, p.fixtime, p.latitude, p.longitude, p.speed, p.attributes
+      `SELECT d.id AS deviceId, d.name, p.fixtime, p.latitude, p.longitude, p.speed, p.attributes, p.address
        FROM ${tbl("devices")} d
        LEFT JOIN (
          SELECT p1.*
@@ -240,23 +240,57 @@ app.get("/api/fleet/status", async (_req, res) => {
        ORDER BY d.name`
     );
 
-    const devices = rows.map((r) => {
+    const devices = [];
+
+    for (const r of rows) {
       let fuel = null;
       try {
         fuel = extractFuelValue(r.attributes, cfg.fuelKey);
       } catch {
         fuel = null;
       }
-      return {
+
+      // Detect recent fuel drop on a small window for alerting
+      let fuelAlert = null;
+      try {
+        const [recentRows] = await pool.query(
+          `SELECT fixtime, attributes
+           FROM ${tbl("positions")}
+           WHERE deviceid = ?
+           ORDER BY fixtime DESC
+           LIMIT 120`,
+          [r.deviceId]
+        );
+        const series = recentRows
+          .map((p) => ({
+            time: p.fixtime,
+            fuel: extractFuelValue(p.attributes, cfg.fuelKey)
+          }))
+          .filter((p) => p.fuel !== null)
+          .sort((a, b) => a.time.localeCompare(b.time));
+        const alerts = detectFuelDrops(series, {
+          dropLiters: cfg.fuelDropLiters,
+          dropPercent: cfg.fuelDropPercent,
+          windowMinutes: cfg.fuelWindowMinutes
+        });
+        if (alerts.length) fuelAlert = alerts[alerts.length - 1];
+      } catch (err) {
+        console.error("fuel_alert_detect_failed", err);
+      }
+
+      devices.push({
         deviceId: r.deviceId,
         name: r.name,
         lastFix: r.fixtime,
         latitude: r.latitude,
         longitude: r.longitude,
+        address: r.address,
         speed: Number(r.speed || 0),
-        fuel
-      };
-    });
+        fuel,
+        fuelAlert,
+        fuelError: fuel === null
+      });
+    }
 
     res.json({ devices });
   } catch (err) {
@@ -264,6 +298,14 @@ app.get("/api/fleet/status", async (_req, res) => {
     res.status(500).json({ error: "fleet_status_failed" });
   }
 });
+
+function formatAddress(addr, lat, lon) {
+  if (addr && typeof addr === "string" && addr.trim()) return addr;
+  if (Number.isFinite(lat) && Number.isFinite(lon)) {
+    return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  }
+  return "-";
+}
 
 async function buildActivityReport(deviceId, month) {
   const start = dayjs(`${month}-01`).startOf("month");
@@ -277,7 +319,7 @@ async function buildActivityReport(deviceId, month) {
   if (!device) throw new Error("device_not_found");
 
   const [rows] = await pool.query(
-    `SELECT fixtime, speed
+    `SELECT fixtime, speed, latitude, longitude, address
      FROM ${tbl("positions")}
      WHERE deviceid = ? AND fixtime >= ? AND fixtime < ?
      ORDER BY fixtime ASC`,
@@ -296,8 +338,17 @@ async function buildActivityReport(deviceId, month) {
     totalSeconds += sec;
     const hours = (sec / 3600).toFixed(2);
     const width = Math.min(100, (sec / 86400) * 100);
+
+    const dayRows = rows.filter((r) => dayjs(r.fixtime).format("YYYY-MM-DD") === day);
+    const startPos = dayRows[0];
+    const endPos = dayRows[dayRows.length - 1];
+
     rowsHtml += `<tr>
       <td>${day}</td>
+      <td>${startPos ? dayjs(startPos.fixtime).format("HH:mm") : "-"}</td>
+      <td>${startPos ? formatAddress(startPos.address, startPos.latitude, startPos.longitude) : "-"}</td>
+      <td>${endPos ? dayjs(endPos.fixtime).format("HH:mm") : "-"}</td>
+      <td>${endPos ? formatAddress(endPos.address, endPos.latitude, endPos.longitude) : "-"}</td>
       <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
       <td>
         <div style="background:#f3f4f6; border:1px solid #e5e7eb; border-radius:8px; height:12px; position:relative; overflow:hidden;">
@@ -336,18 +387,34 @@ async function buildActivityReport(deviceId, month) {
 
   <table>
     <thead>
-      <tr><th>Tag</th><th class="right">Aktive Zeit (h)</th><th>Balken</th></tr>
+      <tr>
+        <th>Tag</th>
+        <th>Start (Zeit)</th>
+        <th>Start (Ort)</th>
+        <th>Ende (Zeit)</th>
+        <th>Ende (Ort)</th>
+        <th class="right">Aktive Zeit (h)</th>
+        <th>Balken</th>
+      </tr>
     </thead>
     <tbody>
       ${rowsHtml}
     </tbody>
     <tfoot>
-      <tr><th>Summe</th><th class="right">${totalHours}</th><th></th></tr>
+      <tr>
+        <th>Summe</th>
+        <th></th>
+        <th></th>
+        <th></th>
+        <th></th>
+        <th class="right">${totalHours}</th>
+        <th></th>
+      </tr>
     </tfoot>
   </table>
 
   <div class="footer">
-    Messbasis: Traccar Telemetrie (OBD). Österreich-konformes Fahrtenbuch (Monatsansicht).<br/>
+    Messbasis: Traccar Telemetrie (OBD). Österreich-konformes Fahrtenbuch (Monatsansicht) – Start/Ende je Tag, aktive Zeit.<br/>
     Parameter: minSpeed=${cfg.minSpeedKmh} km/h,
     stopTolerance=${cfg.stopToleranceSec}s,
     minBlock=${cfg.minMovingSeconds}s
