@@ -438,13 +438,18 @@ function ControllingView({
 
         {/* Side cards */}
         <div style={{ display: "grid", gap: 16 }}>
-          <FuelCard fuel={fuel?.latest || null} />
+          <div style={{ transform: "scale(0.9)", transformOrigin: "top left" }}>
+            <FuelCard fuel={fuel?.latest || null} />
+          </div>
           <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
             <h3 style={{ marginTop: 0 }}>Tankverlauf</h3>
             <FuelHistoryChart series={fuel?.series || []} />
           </div>
-          <AlertsCard alerts={fuel?.alerts || []} />
         </div>
+      </div>
+
+      <div style={{ border: "1px solid #eee", borderRadius: 12, padding: 12 }}>
+        <AlertsCard alerts={fuel?.alerts || []} />
       </div>
 
       <div
