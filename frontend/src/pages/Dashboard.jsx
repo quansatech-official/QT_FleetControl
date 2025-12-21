@@ -383,7 +383,7 @@ function OverviewView({ month, fleetActivity, fleetStatus, onRefresh, search }) 
                   <td style={{ padding: 6 }}>{d.speed?.toFixed(1)} km/h</td>
                   <td style={{ padding: 6 }}>{d.fuel !== null ? `${d.fuel}` : "-"}</td>
                   <td style={{ padding: 6 }}>
-                    {d.fuelAlert ? (
+                    {d.fuelAlert && d.fuelAlert.type === "drop" ? (
                       <span style={{ color: "#b91c1c", fontWeight: 700 }}>Tankabfall</span>
                     ) : d.fuelError ? (
                       <span style={{ color: "#d97706" }}>kein Tankwert</span>
