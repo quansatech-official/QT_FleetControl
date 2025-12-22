@@ -1,17 +1,34 @@
 const envBase = import.meta.env.VITE_API_BASE;
-const envIsLocalhost = !!envBase && /(localhost|127\\.0\\.0\\.1)/.test(envBase);
 
-// Resolve API base URL at runtime. Fall back to server host:3000 when no env
-// is provided or when a localhost base was baked into the bundle but the app
-// is opened from a remote host (common with docker-compose + nginx).
-const fallbackBase = `${window.location.protocol}//${window.location.hostname}:3000/api`;
-export const API_BASE =
-  (!envBase ||
-    (envIsLocalhost &&
-      window.location.hostname !== "localhost" &&
-      window.location.hostname !== "127.0.0.1")) ?
-      fallbackBase :
-      envBase;
+function hostFromUrl(url) {
+  if (!url) return "";
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
+}
+
+function isPrivateHost(host) {
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host.startsWith("10.") ||
+    host.startsWith("192.168.") ||
+    /^172\\.(1[6-9]|2\\d|3[0-1])\\./.test(host)
+  );
+}
+
+const envHost = hostFromUrl(envBase);
+const envIsLocalhost = !!envHost && isPrivateHost(envHost);
+
+// Resolve API base URL at runtime. Fall back to same-origin /api so a reverse
+// proxy can front the internal backend.
+const fallbackBase = `${window.location.origin}/api`;
+const windowHost = window.location.hostname;
+const useFallback =
+  !envBase || (envIsLocalhost && !isPrivateHost(windowHost));
+export const API_BASE = useFallback ? fallbackBase : envBase;
 
 export async function apiGet(path) {
   const r = await fetch(`${API_BASE}${path}`);
