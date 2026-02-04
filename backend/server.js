@@ -140,7 +140,7 @@ function signToken(user) {
 
 async function authenticateWithTraccarApi(identifier, password) {
   if (!TRACCAR_BASE_URL) return null;
-  const url = `${TRACCAR_BASE_URL.replace(/\\/$/, "")}/api/session`;
+  const url = `${TRACCAR_BASE_URL.replace(/\/$/, "")}/api/session`;
   const payload = { email: identifier, password };
 
   const tryRequest = async (headers, body) => {
