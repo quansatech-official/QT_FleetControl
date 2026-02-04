@@ -63,6 +63,7 @@ const cfg = {
   minMovingSeconds: Number(process.env.MIN_MOVING_SECONDS || 60),
   minStopSeconds: Number(process.env.MIN_STOP_SECONDS || 600),
   detailGapSeconds: Number(process.env.DETAIL_GAP_SECONDS || 600), // Segmente enger als dieser Wert werden im Detailreport zusammengelegt
+  detailStopSeconds: Number(process.env.DETAIL_STOP_SECONDS || process.env.MIN_STOP_SECONDS || 600),
   distanceMaxSpeedKmh: Number(process.env.DIST_MAX_SPEED_KMH || 160),
 
   fuelKeys: Array.from(
@@ -854,7 +855,10 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     dayRowsMap.get(dayKey).push(entry);
   }
 
-  const { secondsByDay, segmentsByDay } = computeDailyActivity(rows, cfg);
+  const activityCfg = opts.detail
+    ? { ...cfg, minStopSeconds: cfg.detailStopSeconds }
+    : cfg;
+  const { secondsByDay, segmentsByDay } = computeDailyActivity(rows, activityCfg);
 
   const daysInMonth = end.subtract(1, "day").date();
   let totalSeconds = 0;
@@ -938,7 +942,9 @@ async function buildActivityReport(deviceId, month, opts = {}) {
 
     const dayRows = dayRowsMap.get(day) || [];
     const segmentsRaw = segmentsByDay.get(day) || [];
-    const segments = opts.detail ? mergeSegments(segmentsRaw, cfg.detailGapSeconds) : segmentsRaw;
+    const segments = opts.detail && cfg.detailGapSeconds > 0
+      ? mergeSegments(segmentsRaw, cfg.detailGapSeconds)
+      : segmentsRaw;
 
     // Start/End nach echter Fahrt (erstes/letztes Sample über Threshold)
     let firstMoving = null;
