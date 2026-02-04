@@ -1163,6 +1163,12 @@ async function buildActivityReport(deviceId, month, opts = {}) {
           end: segEnd.format("HH:mm"),
           startAddrP: segStartAddrP,
           endAddrP: segEndAddrP,
+          startTs: segStart.valueOf(),
+          endTs: segEnd.valueOf(),
+          startLat: segStartPos?.latitude,
+          startLon: segStartPos?.longitude,
+          endLat: segEndPos?.latitude,
+          endLon: segEndPos?.longitude,
           duration: ((seg.end - seg.start) / 3600).toFixed(2),
         });
       }
@@ -1217,8 +1223,42 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       end: e.end,
       startAddr,
       endAddr,
-      duration: e.duration
+      duration: e.duration,
+      startTs: e.startTs,
+      endTs: e.endTs,
+      startLat: e.startLat,
+      startLon: e.startLon,
+      endLat: e.endLat,
+      endLon: e.endLon
     });
+  }
+
+  const mergedSegmentRows = [];
+  for (const row of segmentRows) {
+    if (!mergedSegmentRows.length) {
+      mergedSegmentRows.push({ ...row });
+      continue;
+    }
+    const prev = mergedSegmentRows[mergedSegmentRows.length - 1];
+    const sameDay = prev.day === row.day;
+    const gapSec = Math.max(0, (row.startTs - prev.endTs) / 1000);
+    const sameAddresses = prev.startAddr === row.startAddr && prev.endAddr === row.endAddr;
+    const distM = distanceKm(
+      { latitude: prev.endLat, longitude: prev.endLon },
+      { latitude: row.startLat, longitude: row.startLon }
+    ) * 1000;
+
+    if (sameDay && gapSec <= cfg.detailMergeStopSeconds && (sameAddresses || distM < cfg.detailMinStartEndDistanceM)) {
+      prev.end = row.end;
+      prev.endAddr = row.endAddr;
+      prev.endTs = row.endTs;
+      prev.endLat = row.endLat;
+      prev.endLon = row.endLon;
+      const durationHours = (prev.endTs - prev.startTs) / 3600000;
+      prev.duration = durationHours.toFixed(2);
+      continue;
+    }
+    mergedSegmentRows.push({ ...row });
   }
 
   const totalHours = (totalSeconds / 3600).toFixed(2);
@@ -1257,7 +1297,7 @@ async function buildActivityReport(deviceId, month, opts = {}) {
   </table>
   `;
 
-  const detailTable = !opts.detail || !segmentRows.length ? "" : `
+  const detailTable = !opts.detail || !mergedSegmentRows.length ? "" : `
   <div class="page-break"></div>
   <h2>Detail – Fahrtenliste</h2>
   <div class="subtle">Einzelfahrten gemäß Fahrzeitblöcken</div>
@@ -1276,7 +1316,7 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       ${(() => {
         let lastDay = null;
         let i = 0;
-        return segmentRows.map((r) => {
+        return mergedSegmentRows.map((r) => {
           const dayLine = r.day !== lastDay
             ? `<tr class="day-row"><td colspan="6">${r.day}</td></tr>`
             : "";
@@ -1328,7 +1368,7 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     .bar-row td { vertical-align: middle; }
     .bar-seg { position:absolute; top:0; bottom:0; background:#2563eb; }
     .page-break { page-break-before: always; }
-    .detail-table { table-layout: auto; }
+    .detail-table { table-layout: fixed; }
     .detail-table th, .detail-table td { padding:5px 6px; }
     .detail-table th:nth-child(1) { width:90px; }
     .detail-table th:nth-child(2),
