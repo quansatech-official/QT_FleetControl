@@ -1,8 +1,60 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Dashboard from "./pages/Dashboard.jsx";
+import Login from "./components/Login.jsx";
+import { apiGet, apiPost, clearToken, getToken, setToken } from "./api.js";
 import logo from "../QTIT.png";
 
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [loginError, setLoginError] = useState("");
+
+  useEffect(() => {
+    const authDisabled = String(import.meta.env.VITE_AUTH_DISABLED || "").toLowerCase() === "true";
+    if (authDisabled) {
+      setUser({ id: 0, name: "debug", administrator: true });
+      setAuthChecked(true);
+      return;
+    }
+    const token = getToken();
+    if (!token) {
+      setAuthChecked(true);
+      return;
+    }
+    apiGet("/me")
+      .then((res) => {
+        setUser(res?.user || null);
+      })
+      .catch(() => {
+        clearToken();
+        setUser(null);
+      })
+      .finally(() => setAuthChecked(true));
+  }, []);
+
+  const handleLogin = async ({ identifier, password }) => {
+    const authDisabled = String(import.meta.env.VITE_AUTH_DISABLED || "").toLowerCase() === "true";
+    if (authDisabled) return;
+    setLoginError("");
+    try {
+      const res = await apiPost("/login", { identifier, password });
+      if (!res?.token) {
+        setLoginError("Login fehlgeschlagen");
+        return;
+      }
+      setToken(res.token);
+      setUser(res.user || null);
+    } catch (err) {
+      console.error(err);
+      setLoginError("Login fehlgeschlagen");
+    }
+  };
+
+  const handleLogout = () => {
+    clearToken();
+    setUser(null);
+  };
+
   return (
     <div
       style={{
@@ -53,10 +105,36 @@ export default function App() {
               Fleet Analytics Dashboard – Live, Controlling & Werkstatt
             </div>
           </div>
+          {user ? (
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ fontSize: 12, opacity: 0.9 }}>
+                {user.name || user.email || "User"}
+              </div>
+              <button
+                onClick={handleLogout}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  border: "1px solid rgba(255,255,255,0.6)",
+                  background: "rgba(255,255,255,0.15)",
+                  color: "#fff",
+                  fontWeight: 600
+                }}
+              >
+                Logout
+              </button>
+            </div>
+          ) : null}
         </header>
 
         <main style={{ padding: 16 }}>
-          <Dashboard />
+          {!authChecked ? (
+            <div style={{ padding: 24, color: "#475569" }}>Authentifizierung…</div>
+          ) : user ? (
+            <Dashboard />
+          ) : (
+            <Login onSubmit={handleLogin} error={loginError} />
+          )}
         </main>
       </div>
     </div>

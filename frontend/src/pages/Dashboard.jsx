@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import dayjs from "dayjs";
 
-import { apiGet, API_BASE } from "../api.js";
+import { apiGet, API_BASE, getToken, withAuthToken } from "../api.js";
 import MonthPicker from "../components/MonthPicker.jsx";
 import ActivityBarChart from "../components/ActivityBarChart.jsx";
 import FuelCard from "../components/FuelCard.jsx";
@@ -136,12 +136,16 @@ export default function Dashboard() {
      ===================== */
   const pdfUrl = useMemo(() => {
     if (!deviceId) return "#";
-    return `${API_BASE}/reports/activity.pdf?deviceId=${deviceId}&month=${month}`;
+    return withAuthToken(
+      `${API_BASE}/reports/activity.pdf?deviceId=${deviceId}&month=${month}`
+    );
   }, [deviceId, month]);
 
   const pdfDetailUrl = useMemo(() => {
     if (!deviceId) return "#";
-    return `${API_BASE}/reports/activity.pdf?deviceId=${deviceId}&month=${month}&detail=1`;
+    return withAuthToken(
+      `${API_BASE}/reports/activity.pdf?deviceId=${deviceId}&month=${month}&detail=1`
+    );
   }, [deviceId, month]);
 
   const handleZipExport = async (detail = false) => {
@@ -152,10 +156,13 @@ export default function Dashboard() {
     setExportError("");
     setExporting(true);
     try {
+      const token = getToken();
       const params = new URLSearchParams({ month });
       params.set("deviceIds", exportSelection.join(","));
       if (detail) params.set("detail", "1");
-      const resp = await fetch(`${API_BASE}/reports/activity.zip?${params.toString()}`);
+      const resp = await fetch(`${API_BASE}/reports/activity.zip?${params.toString()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined
+      });
       if (!resp.ok) throw new Error("export_failed");
       const blob = await resp.blob();
       const url = window.URL.createObjectURL(blob);

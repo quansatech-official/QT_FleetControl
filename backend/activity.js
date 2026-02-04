@@ -22,6 +22,7 @@ function splitBlockByDay(start, end) {
 export function computeDailyActivity(rows, cfg) {
   let blockStart = null;
   let lastMove = null;
+  let prevTime = null;
   const secondsByDay = new Map();
   const segmentsByDay = new Map();
 
@@ -42,12 +43,26 @@ export function computeDailyActivity(rows, cfg) {
 
   for (const r of rows) {
     const t = dayjs(r.fixtime);
+    if (prevTime) {
+      const gapSec = t.diff(prevTime, "second");
+      if (gapSec >= cfg.minStopSeconds) {
+        // Hard split on data gaps to surface stops between samples.
+        flush();
+      }
+    }
     if (Number(r.speed) >= cfg.minSpeedKmh) {
       if (!blockStart) blockStart = t.toISOString();
       lastMove = t.toISOString();
     } else if (blockStart) {
-      if (t.diff(dayjs(lastMove), "second") > cfg.stopToleranceSec) flush();
+      const idleSec = t.diff(dayjs(lastMove), "second");
+      if (idleSec >= cfg.minStopSeconds) {
+        flush();
+      } else if (idleSec > cfg.stopToleranceSec) {
+        // tolerate brief drops below speed threshold
+        // without ending the current moving block
+      }
     }
+    prevTime = t;
   }
   flush();
   return { secondsByDay, segmentsByDay };

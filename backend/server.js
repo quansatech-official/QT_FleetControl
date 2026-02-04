@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import archiver from "archiver";
 import dayjs from "dayjs";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
 import { createPoolFromEnv } from "./db.js";
 import { computeDailyActivity } from "./activity.js";
@@ -59,6 +61,7 @@ const cfg = {
   minSpeedKmh: Number(process.env.MIN_SPEED_KMH || 5),
   stopToleranceSec: Number(process.env.STOP_TOLERANCE_SEC || 120),
   minMovingSeconds: Number(process.env.MIN_MOVING_SECONDS || 60),
+  minStopSeconds: Number(process.env.MIN_STOP_SECONDS || 600),
   detailGapSeconds: Number(process.env.DETAIL_GAP_SECONDS || 600), // Segmente enger als dieser Wert werden im Detailreport zusammengelegt
   distanceMaxSpeedKmh: Number(process.env.DIST_MAX_SPEED_KMH || 160),
 
@@ -81,6 +84,156 @@ const cfg = {
 };
 
 /* =======================
+   Auth (Traccar)
+   ======================= */
+const JWT_SECRET = process.env.JWT_SECRET || "dev_only_change_me";
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "12h";
+const TRACCAR_BASE_URL = process.env.TRACCAR_BASE_URL || "";
+const TRACCAR_AUTH_MODE =
+  process.env.TRACCAR_AUTH_MODE || (TRACCAR_BASE_URL ? "api" : "db");
+const AUTH_DISABLED = String(process.env.AUTH_DISABLED || "").toLowerCase() === "true";
+
+if (JWT_SECRET === "dev_only_change_me") {
+  console.warn("JWT_SECRET not set. Using insecure default.");
+}
+
+function getTokenFromReq(req, allowQueryToken) {
+  const auth = req.headers.authorization || "";
+  if (auth.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
+  if (allowQueryToken && typeof req.query?.token === "string" && req.query.token.trim()) {
+    return req.query.token.trim();
+  }
+  return "";
+}
+
+function authRequired({ allowQueryToken = false } = {}) {
+  return (req, res, next) => {
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    if (AUTH_DISABLED) {
+      req.user = { id: 0, name: "debug", administrator: true };
+      return next();
+    }
+    const token = getTokenFromReq(req, allowQueryToken);
+    if (!token) return res.status(401).json({ error: "unauthorized" });
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      req.user = payload;
+      return next();
+    } catch {
+      return res.status(401).json({ error: "unauthorized" });
+    }
+  };
+}
+
+function signToken(user) {
+  return jwt.sign(
+    {
+      id: user.id,
+      name: user.name || null,
+      email: user.email || null,
+      administrator: !!user.administrator
+    },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES_IN }
+  );
+}
+
+async function authenticateWithTraccarApi(identifier, password) {
+  if (!TRACCAR_BASE_URL) return null;
+  const url = `${TRACCAR_BASE_URL.replace(/\\/$/, "")}/api/session`;
+  const payload = { email: identifier, password };
+
+  const tryRequest = async (headers, body) => {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers,
+      body
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json().catch(() => null);
+    return data || null;
+  };
+
+  // Try JSON, then form-encoded for older Traccar servers
+  let data = await tryRequest(
+    { "Content-Type": "application/json" },
+    JSON.stringify(payload)
+  );
+  if (!data) {
+    const params = new URLSearchParams(payload);
+    data = await tryRequest(
+      { "Content-Type": "application/x-www-form-urlencoded" },
+      params.toString()
+    );
+  }
+
+  if (!data || data.disabled) return null;
+  return {
+    id: data.id,
+    name: data.name,
+    email: data.email,
+    administrator: !!data.administrator
+  };
+}
+
+async function authenticateWithTraccarDb(identifier, password) {
+  const [rows] = await pool.query(
+    `SELECT * FROM ${tbl("users")} WHERE (email = ? OR name = ?) LIMIT 1`,
+    [identifier, identifier]
+  );
+  const user = rows?.[0];
+  if (!user || user.disabled) return null;
+
+  const hash = user.password || user.hashedpassword || user.hashedPassword || "";
+  if (!hash || typeof hash !== "string") {
+    return { error: "unsupported_hash" };
+  }
+
+  const ok = await bcrypt.compare(password, hash);
+  if (!ok) return null;
+
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    administrator: !!(user.administrator ?? user.admin ?? user.isadmin)
+  };
+}
+
+async function resolveEmailFromDb(identifier) {
+  const [rows] = await pool.query(
+    `SELECT email FROM ${tbl("users")} WHERE (email = ? OR name = ?) LIMIT 1`,
+    [identifier, identifier]
+  );
+  return rows?.[0]?.email || null;
+}
+
+async function authenticateTraccarUser(identifier, password) {
+  if (TRACCAR_AUTH_MODE === "api") {
+    let apiIdentifier = identifier;
+    if (!identifier.includes("@")) {
+      const resolved = await resolveEmailFromDb(identifier);
+      if (resolved) apiIdentifier = resolved;
+    }
+    const apiUser = await authenticateWithTraccarApi(apiIdentifier, password);
+    if (apiUser) return apiUser;
+  }
+  if (TRACCAR_AUTH_MODE === "db" || !TRACCAR_BASE_URL) {
+    return authenticateWithTraccarDb(identifier, password);
+  }
+  return null;
+}
+
+async function requireDeviceAccess(user, deviceId) {
+  if (!user || user.administrator) return true;
+  const [rows] = await pool.query(
+    `SELECT 1 FROM ${tbl("user_device")} WHERE userid = ? AND deviceid = ? LIMIT 1`,
+    [user.id, deviceId]
+  );
+  return rows.length > 0;
+}
+
+/* =======================
    Health
    ======================= */
 app.get("/api/health", (_req, res) => {
@@ -88,13 +241,73 @@ app.get("/api/health", (_req, res) => {
 });
 
 /* =======================
+   Auth
+   ======================= */
+app.post("/api/login", async (req, res) => {
+  if (AUTH_DISABLED) {
+    const user = { id: 0, name: "debug", email: null, administrator: true };
+    const token = signToken(user);
+    return res.json({ token, user });
+  }
+  const identifier = String(req.body?.identifier || "").trim();
+  const password = String(req.body?.password || "");
+  if (!identifier || !password) {
+    return res.status(400).json({ error: "identifier_password_required" });
+  }
+
+  try {
+    const user = await authenticateTraccarUser(identifier, password);
+    if (!user) return res.status(401).json({ error: "invalid_credentials" });
+    if (user?.error === "unsupported_hash") {
+      return res.status(401).json({ error: "unsupported_hash" });
+    }
+
+    const token = signToken(user);
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        administrator: !!user.administrator
+      }
+    });
+  } catch (err) {
+    console.error("login_failed", err);
+    res.status(500).json({ error: "login_failed" });
+  }
+});
+
+app.get("/api/me", authRequired(), (req, res) => {
+  res.json({ user: req.user });
+});
+
+app.use("/api", (req, res, next) => {
+  const allowQueryToken = req.path.startsWith("/reports/");
+  return authRequired({ allowQueryToken })(req, res, next);
+});
+
+/* =======================
    Devices
    ======================= */
 app.get("/api/devices", async (_req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT id, name, uniqueid FROM ${tbl("devices")} WHERE disabled = 0 ORDER BY name`
-    );
+    const user = _req.user;
+    let rows;
+    if (user?.administrator) {
+      [rows] = await pool.query(
+        `SELECT id, name, uniqueid FROM ${tbl("devices")} WHERE disabled = 0 ORDER BY name`
+      );
+    } else {
+      [rows] = await pool.query(
+        `SELECT d.id, d.name, d.uniqueid
+         FROM ${tbl("devices")} d
+         JOIN ${tbl("user_device")} ud ON ud.deviceid = d.id
+         WHERE d.disabled = 0 AND ud.userid = ?
+         ORDER BY d.name`,
+        [user.id]
+      );
+    }
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -114,6 +327,10 @@ app.get("/api/activity/month", async (req, res) => {
   }
 
   try {
+    const user = req.user;
+    const allowed = await requireDeviceAccess(user, deviceId);
+    if (!allowed) return res.status(403).json({ error: "forbidden" });
+
     const start = dayjs(`${month}-01`).startOf("month");
     const end = start.add(1, "month");
 
@@ -159,6 +376,10 @@ app.get("/api/fuel/month", async (req, res) => {
   }
 
   try {
+    const user = req.user;
+    const allowed = await requireDeviceAccess(user, deviceId);
+    if (!allowed) return res.status(403).json({ error: "forbidden" });
+
     const start = dayjs(`${month}-01`).startOf("month");
     const end = start.add(1, "month");
 
@@ -263,18 +484,33 @@ app.get("/api/fleet/activity", async (req, res) => {
   }
 
   try {
+    const user = req.user;
     const start = dayjs(`${month}-01`).startOf("month");
     const end = start.add(1, "month");
 
-    const [rows] = await pool.query(
-      `SELECT d.id AS deviceId, d.name, p.fixtime, p.speed
-       FROM ${tbl("devices")} d
-       LEFT JOIN ${tbl("positions")} p
-         ON p.deviceid = d.id AND p.fixtime >= ? AND p.fixtime < ?
-       WHERE d.disabled = 0
-       ORDER BY d.id, p.fixtime`,
-      [start.toDate(), end.toDate()]
-    );
+    let rows;
+    if (user?.administrator) {
+      [rows] = await pool.query(
+        `SELECT d.id AS deviceId, d.name, p.fixtime, p.speed
+         FROM ${tbl("devices")} d
+         LEFT JOIN ${tbl("positions")} p
+           ON p.deviceid = d.id AND p.fixtime >= ? AND p.fixtime < ?
+         WHERE d.disabled = 0
+         ORDER BY d.id, p.fixtime`,
+        [start.toDate(), end.toDate()]
+      );
+    } else {
+      [rows] = await pool.query(
+        `SELECT d.id AS deviceId, d.name, p.fixtime, p.speed
+         FROM ${tbl("devices")} d
+         JOIN ${tbl("user_device")} ud ON ud.deviceid = d.id AND ud.userid = ?
+         LEFT JOIN ${tbl("positions")} p
+           ON p.deviceid = d.id AND p.fixtime >= ? AND p.fixtime < ?
+         WHERE d.disabled = 0
+         ORDER BY d.id, p.fixtime`,
+        [user.id, start.toDate(), end.toDate()]
+      );
+    }
 
     const byDevice = new Map();
     for (const r of rows) {
@@ -331,12 +567,24 @@ app.get("/api/fleet/alerts", async (req, res) => {
   }
 
   try {
+    const user = req.user;
     const start = dayjs(`${month}-01`).startOf("month");
     const end = start.add(1, "month");
 
-    const [devices] = await pool.query(
-      `SELECT id FROM ${tbl("devices")} WHERE disabled = 0`
-    );
+    let devices;
+    if (user?.administrator) {
+      [devices] = await pool.query(
+        `SELECT id FROM ${tbl("devices")} WHERE disabled = 0`
+      );
+    } else {
+      [devices] = await pool.query(
+        `SELECT d.id
+         FROM ${tbl("devices")} d
+         JOIN ${tbl("user_device")} ud ON ud.deviceid = d.id AND ud.userid = ?
+         WHERE d.disabled = 0`,
+        [user.id]
+      );
+    }
 
     let totalDrops = 0;
 
@@ -384,22 +632,45 @@ app.get("/api/fleet/alerts", async (req, res) => {
    ======================= */
 app.get("/api/fleet/status", async (_req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT d.id AS deviceId, d.name, p.fixtime, p.latitude, p.longitude, p.speed, p.attributes, p.address
-       FROM ${tbl("devices")} d
-       LEFT JOIN (
-         SELECT p1.*
-         FROM ${tbl("positions")} p1
-         JOIN (
-           SELECT deviceid, MAX(fixtime) AS maxFix
-           FROM ${tbl("positions")}
-           GROUP BY deviceid
-         ) latest
-         ON latest.deviceid = p1.deviceid AND latest.maxFix = p1.fixtime
-       ) p ON p.deviceid = d.id
-       WHERE d.disabled = 0
-       ORDER BY d.name`
-    );
+    const user = _req.user;
+    let rows;
+    if (user?.administrator) {
+      [rows] = await pool.query(
+        `SELECT d.id AS deviceId, d.name, p.fixtime, p.latitude, p.longitude, p.speed, p.attributes, p.address
+         FROM ${tbl("devices")} d
+         LEFT JOIN (
+           SELECT p1.*
+           FROM ${tbl("positions")} p1
+           JOIN (
+             SELECT deviceid, MAX(fixtime) AS maxFix
+             FROM ${tbl("positions")}
+             GROUP BY deviceid
+           ) latest
+           ON latest.deviceid = p1.deviceid AND latest.maxFix = p1.fixtime
+         ) p ON p.deviceid = d.id
+         WHERE d.disabled = 0
+         ORDER BY d.name`
+      );
+    } else {
+      [rows] = await pool.query(
+        `SELECT d.id AS deviceId, d.name, p.fixtime, p.latitude, p.longitude, p.speed, p.attributes, p.address
+         FROM ${tbl("devices")} d
+         JOIN ${tbl("user_device")} ud ON ud.deviceid = d.id AND ud.userid = ?
+         LEFT JOIN (
+           SELECT p1.*
+           FROM ${tbl("positions")} p1
+           JOIN (
+             SELECT deviceid, MAX(fixtime) AS maxFix
+             FROM ${tbl("positions")}
+             GROUP BY deviceid
+           ) latest
+           ON latest.deviceid = p1.deviceid AND latest.maxFix = p1.fixtime
+         ) p ON p.deviceid = d.id
+         WHERE d.disabled = 0
+         ORDER BY d.name`,
+        [user.id]
+      );
+    }
 
     const devices = [];
 
@@ -575,6 +846,14 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     [deviceId, start.toDate(), end.toDate()]
   );
 
+  const dayRowsMap = new Map();
+  for (const r of rows) {
+    const dayKey = dayjs(r.fixtime).format("YYYY-MM-DD");
+    const entry = { ...r, _day: dayKey, _ts: dayjs(r.fixtime).valueOf() };
+    if (!dayRowsMap.has(dayKey)) dayRowsMap.set(dayKey, []);
+    dayRowsMap.get(dayKey).push(entry);
+  }
+
   const { secondsByDay, segmentsByDay } = computeDailyActivity(rows, cfg);
 
   const daysInMonth = end.subtract(1, "day").date();
@@ -582,19 +861,22 @@ async function buildActivityReport(deviceId, month, opts = {}) {
   let totalDistanceKm = 0;
   let rowsHtml = "";
 
-  const findNearestPosition = (dayRows, targetIso) => {
+  const findNearestPosition = (dayRows, targetMs) => {
     if (!dayRows.length) return null;
-    let best = null;
-    let bestDiff = Number.MAX_VALUE;
-    const target = dayjs(targetIso);
-    for (const r of dayRows) {
-      const diff = Math.abs(dayjs(r.fixtime).diff(target, "second"));
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        best = r;
-      }
+    let lo = 0;
+    let hi = dayRows.length - 1;
+    while (lo <= hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      const v = dayRows[mid]._ts;
+      if (v === targetMs) return dayRows[mid];
+      if (v < targetMs) lo = mid + 1;
+      else hi = mid - 1;
     }
-    return best;
+    const idx = Math.min(Math.max(lo, 0), dayRows.length - 1);
+    const a = dayRows[idx];
+    const b = idx > 0 ? dayRows[idx - 1] : null;
+    if (!b) return a;
+    return Math.abs(a._ts - targetMs) < Math.abs(b._ts - targetMs) ? a : b;
   };
 
   const distanceKm = (a, b) => {
@@ -636,6 +918,17 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     return out;
   };
 
+  const addressCache = new Map();
+  const resolveAddressCached = async (addr, lat, lon) => {
+    const key = `${addr || ""}|${Number.isFinite(lat) ? lat.toFixed(5) : ""}|${
+      Number.isFinite(lon) ? lon.toFixed(5) : ""
+    }`;
+    if (addressCache.has(key)) return addressCache.get(key);
+    const value = await resolveAddress(addr, lat, lon);
+    addressCache.set(key, value);
+    return value;
+  };
+
   for (let d = 1; d <= daysInMonth; d++) {
     const day = start.date(d).format("YYYY-MM-DD");
     const sec = secondsByDay.get(day) || 0;
@@ -643,23 +936,34 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     const hours = (sec / 3600).toFixed(2);
     const width = Math.min(100, (sec / 86400) * 100);
 
-    const dayRows = rows.filter((r) => dayjs(r.fixtime).format("YYYY-MM-DD") === day);
+    const dayRows = dayRowsMap.get(day) || [];
     const segmentsRaw = segmentsByDay.get(day) || [];
     const segments = opts.detail ? mergeSegments(segmentsRaw, cfg.detailGapSeconds) : segmentsRaw;
 
     // Start/End nach echter Fahrt (erstes/letztes Sample über Threshold)
-    const movingRows = dayRows.filter((r) => Number(r.speed) >= cfg.minSpeedKmh);
-    const startTimeIso = movingRows.length ? dayjs(movingRows[0].fixtime).toISOString() : null;
-    const endTimeIso = movingRows.length ? dayjs(movingRows[movingRows.length - 1].fixtime).toISOString() : null;
+    let firstMoving = null;
+    let lastMoving = null;
+    for (const r of dayRows) {
+      if (Number(r.speed) >= cfg.minSpeedKmh) {
+        if (!firstMoving) firstMoving = r;
+        lastMoving = r;
+      }
+    }
+    const startTimeIso = firstMoving ? dayjs(firstMoving.fixtime).toISOString() : null;
+    const endTimeIso = lastMoving ? dayjs(lastMoving.fixtime).toISOString() : null;
 
-    const startPos = startTimeIso ? findNearestPosition(dayRows, startTimeIso) : null;
-    const endPos = endTimeIso ? findNearestPosition(dayRows, endTimeIso) : null;
+    const startPos = startTimeIso
+      ? findNearestPosition(dayRows, dayjs(startTimeIso).valueOf())
+      : null;
+    const endPos = endTimeIso
+      ? findNearestPosition(dayRows, dayjs(endTimeIso).valueOf())
+      : null;
 
     const startAddress = startPos
-      ? await resolveAddress(startPos.address, startPos.latitude, startPos.longitude)
+      ? await resolveAddressCached(startPos.address, startPos.latitude, startPos.longitude)
       : "-";
     const endAddress = endPos
-      ? await resolveAddress(endPos.address, endPos.latitude, endPos.longitude)
+      ? await resolveAddressCached(endPos.address, endPos.latitude, endPos.longitude)
       : "-";
 
     // Distanz pro Tag (ungefähr, Haversine zwischen Positionspunkten)
@@ -686,20 +990,21 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       .join("");
 
     if (opts.detail) {
+      const dayStart = dayjs(day).startOf("day");
       for (const seg of segments) {
-        const segStart = dayjs(day).startOf("day").add(seg.start, "second");
-        const segEnd = dayjs(day).startOf("day").add(seg.end, "second");
-        const segStartPos = findNearestPosition(dayRows, segStart.toISOString());
-        const segEndPos = findNearestPosition(dayRows, segEnd.toISOString());
+        const segStart = dayStart.add(seg.start, "second");
+        const segEnd = dayStart.add(seg.end, "second");
+        const segStartPos = findNearestPosition(dayRows, segStart.valueOf());
+        const segEndPos = findNearestPosition(dayRows, segEnd.valueOf());
         segmentRows.push({
           day,
           start: segStart.format("HH:mm"),
           startAddr: segStartPos
-            ? await resolveAddress(segStartPos.address, segStartPos.latitude, segStartPos.longitude)
+            ? await resolveAddressCached(segStartPos.address, segStartPos.latitude, segStartPos.longitude)
             : "-",
           end: segEnd.format("HH:mm"),
           endAddr: segEndPos
-            ? await resolveAddress(segEndPos.address, segEndPos.latitude, segEndPos.longitude)
+            ? await resolveAddressCached(segEndPos.address, segEndPos.latitude, segEndPos.longitude)
             : "-",
           duration: ((seg.end - seg.start) / 3600).toFixed(2),
         });
@@ -834,7 +1139,8 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     Messbasis: Traccar Telemetrie (OBD). Österreich-konformes Fahrtenbuch (Monatsansicht) – Start/Ende je Tag, aktive Zeit.<br/>
     Parameter: minSpeed=${cfg.minSpeedKmh} km/h,
     stopTolerance=${cfg.stopToleranceSec}s,
-    minBlock=${cfg.minMovingSeconds}s
+    minBlock=${cfg.minMovingSeconds}s,
+    minStop=${cfg.minStopSeconds}s
   </div>
 
   ${detailTable}
@@ -863,6 +1169,10 @@ app.get("/api/reports/activity.pdf", async (req, res) => {
   }
 
   try {
+    const user = req.user;
+    const allowed = await requireDeviceAccess(user, deviceId);
+    if (!allowed) return res.status(403).json({ error: "forbidden" });
+
     const { pdf, filename } = await buildActivityReport(deviceId, month, { detail });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
@@ -892,15 +1202,38 @@ app.get("/api/reports/activity.zip", async (req, res) => {
     .filter((n) => Number.isFinite(n));
 
   try {
+    const user = req.user;
     if (!deviceIds.length) {
-      const [rows] = await pool.query(
-        `SELECT id FROM ${tbl("devices")} WHERE disabled = 0 ORDER BY name`
-      );
-      deviceIds = rows.map((r) => r.id);
+      if (user?.administrator) {
+        const [rows] = await pool.query(
+          `SELECT id FROM ${tbl("devices")} WHERE disabled = 0 ORDER BY name`
+        );
+        deviceIds = rows.map((r) => r.id);
+      } else {
+        const [rows] = await pool.query(
+          `SELECT d.id
+           FROM ${tbl("devices")} d
+           JOIN ${tbl("user_device")} ud ON ud.deviceid = d.id AND ud.userid = ?
+           WHERE d.disabled = 0
+           ORDER BY d.name`,
+          [user.id]
+        );
+        deviceIds = rows.map((r) => r.id);
+      }
     }
 
     if (!deviceIds.length) {
       return res.status(400).json({ error: "no_devices" });
+    }
+
+    if (!user?.administrator) {
+      const [rows] = await pool.query(
+        `SELECT deviceid FROM ${tbl("user_device")} WHERE userid = ?`,
+        [user.id]
+      );
+      const allowedIds = new Set(rows.map((r) => Number(r.deviceid)));
+      deviceIds = deviceIds.filter((id) => allowedIds.has(id));
+      if (!deviceIds.length) return res.status(403).json({ error: "forbidden" });
     }
 
     res.setHeader("Content-Type", "application/zip");
