@@ -64,6 +64,9 @@ const cfg = {
   minStopSeconds: Number(process.env.MIN_STOP_SECONDS || 600),
   detailGapSeconds: Number(process.env.DETAIL_GAP_SECONDS || 600), // Segmente enger als dieser Wert werden im Detailreport zusammengelegt
   detailStopSeconds: Number(process.env.DETAIL_STOP_SECONDS || process.env.MIN_STOP_SECONDS || 600),
+  detailMinSegmentSeconds: Number(process.env.DETAIL_MIN_SEGMENT_SECONDS || 180),
+  detailMinSegmentDistanceM: Number(process.env.DETAIL_MIN_SEGMENT_DISTANCE_M || 200),
+  detailMinStartEndDistanceM: Number(process.env.DETAIL_MIN_START_END_DISTANCE_M || 150),
   distanceMaxSpeedKmh: Number(process.env.DIST_MAX_SPEED_KMH || 160),
 
   fuelKeys: Array.from(
@@ -903,6 +906,36 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     return R * c;
   };
 
+  const lowerBoundTs = (arr, targetMs) => {
+    let lo = 0;
+    let hi = arr.length;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (arr[mid]._ts < targetMs) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+
+  const upperBoundTs = (arr, targetMs) => {
+    let lo = 0;
+    let hi = arr.length;
+    while (lo < hi) {
+      const mid = Math.floor((lo + hi) / 2);
+      if (arr[mid]._ts <= targetMs) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+
+  const rowsInRange = (arr, startMs, endMs) => {
+    if (!arr.length) return [];
+    const startIdx = lowerBoundTs(arr, startMs);
+    const endIdx = upperBoundTs(arr, endMs);
+    if (startIdx >= endIdx) return [];
+    return arr.slice(startIdx, endIdx);
+  };
+
   const segmentRows = [];
 
   const mergeSegments = (segments, gapSec) => {
@@ -931,6 +964,20 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     const value = await resolveAddress(addr, lat, lon);
     addressCache.set(key, value);
     return value;
+  };
+
+  const formatAddressForReport = (addr) => {
+    if (!addr) return "-";
+    const raw = String(addr);
+    const parts = raw.split(",").map((p) => p.trim()).filter(Boolean);
+    const drop = new Set(["AT", "Austria", "Upper Austria", "Oberösterreich", "Upper Austria"]);
+    const cleaned = parts.filter((p) => !drop.has(p));
+    if (cleaned.length >= 3 && /^\d{4,5}$/.test(cleaned[1])) {
+      const combined = `${cleaned[1]} ${cleaned[2]}`.trim();
+      cleaned.splice(1, 2, combined);
+    }
+    const short = cleaned.slice(0, 3).join(", ");
+    return short.replace(/, /g, ", <wbr>");
   };
 
   for (let d = 1; d <= daysInMonth; d++) {
@@ -1000,17 +1047,50 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       for (const seg of segments) {
         const segStart = dayStart.add(seg.start, "second");
         const segEnd = dayStart.add(seg.end, "second");
-        const segStartPos = findNearestPosition(dayRows, segStart.valueOf());
-        const segEndPos = findNearestPosition(dayRows, segEnd.valueOf());
+        const segRows = rowsInRange(dayRows, segStart.valueOf(), segEnd.valueOf());
+        if (segRows.length < 2) continue;
+
+        const segDurationSec = seg.end - seg.start;
+        if (segDurationSec < cfg.detailMinSegmentSeconds) continue;
+
+        let segDistanceKm = 0;
+        for (let i = 1; i < segRows.length; i++) {
+          const deltaKm = distanceKm(segRows[i - 1], segRows[i]);
+          const deltaSec = Math.max(0, (segRows[i]._ts - segRows[i - 1]._ts) / 1000);
+          if (!deltaSec) continue;
+          const speedKmh = (deltaKm / deltaSec) * 3600;
+          if (speedKmh > cfg.distanceMaxSpeedKmh) continue;
+          segDistanceKm += deltaKm;
+        }
+        if (segDistanceKm * 1000 < cfg.detailMinSegmentDistanceM) continue;
+
+        const segStartPos = segRows[0];
+        const segEndPos = segRows[segRows.length - 1];
+        if (distanceKm(segStartPos, segEndPos) * 1000 < cfg.detailMinStartEndDistanceM) {
+          continue;
+        }
+
         segmentRows.push({
           day,
           start: segStart.format("HH:mm"),
           startAddr: segStartPos
-            ? await resolveAddressCached(segStartPos.address, segStartPos.latitude, segStartPos.longitude)
+            ? formatAddressForReport(
+                await resolveAddressCached(
+                  segStartPos.address,
+                  segStartPos.latitude,
+                  segStartPos.longitude
+                )
+              )
             : "-",
           end: segEnd.format("HH:mm"),
           endAddr: segEndPos
-            ? await resolveAddressCached(segEndPos.address, segEndPos.latitude, segEndPos.longitude)
+            ? formatAddressForReport(
+                await resolveAddressCached(
+                  segEndPos.address,
+                  segEndPos.latitude,
+                  segEndPos.longitude
+                )
+              )
             : "-",
           duration: ((seg.end - seg.start) / 3600).toFixed(2),
         });
@@ -1052,14 +1132,26 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       </tr>
     </thead>
     <tbody>
-      ${segmentRows.map((r, i) => `<tr class="${i % 2 ? "row-alt" : ""}">
-        <td>${r.day}</td>
-        <td>${r.start}</td>
-        <td>${r.startAddr}</td>
-        <td>${r.end}</td>
-        <td>${r.endAddr}</td>
-        <td class="right" style="font-variant-numeric: tabular-nums;">${r.duration}</td>
-      </tr>`).join("")}
+      ${(() => {
+        let lastDay = null;
+        let i = 0;
+        return segmentRows.map((r) => {
+          const dayLine = r.day !== lastDay
+            ? `<tr class="day-row"><td colspan="6">${r.day}</td></tr>`
+            : "";
+          lastDay = r.day;
+          const row = `<tr class="${i % 2 ? "row-alt" : ""}">
+            <td>${r.day}</td>
+            <td>${r.start}</td>
+            <td>${r.startAddr}</td>
+            <td>${r.end}</td>
+            <td>${r.endAddr}</td>
+            <td class="right" style="font-variant-numeric: tabular-nums;">${r.duration}</td>
+          </tr>`;
+          i += 1;
+          return dayLine + row;
+        }).join("");
+      })()}
     </tbody>
   </table>
   `;
@@ -1088,7 +1180,23 @@ async function buildActivityReport(deviceId, month, opts = {}) {
            background-image: repeating-linear-gradient(to right, #e2e8f0 0, #e2e8f0 1px, transparent 1px, transparent 4.1667%); }
     .bar-seg { position:absolute; top:0; bottom:0; background:#2563eb; }
     .page-break { page-break-before: always; }
+    .detail-table { table-layout: auto; }
     .detail-table th, .detail-table td { padding:5px 6px; }
+    .detail-table th:nth-child(1) { width:90px; }
+    .detail-table th:nth-child(2),
+    .detail-table th:nth-child(4) { width:50px; }
+    .detail-table th:nth-child(6) { width:70px; }
+    .detail-table td:nth-child(3),
+    .detail-table td:nth-child(5) {
+      word-break: keep-all;
+      overflow-wrap: normal;
+      hyphens: auto;
+    }
+    .detail-table .day-row td {
+      background:#eef2ff;
+      font-weight:700;
+      border-top:1px solid #c7d2fe;
+    }
     .row-alt { background:#f8fafc; }
     .footer { margin-top:12px; color:#64748b; font-size:10px; }
   </style>
