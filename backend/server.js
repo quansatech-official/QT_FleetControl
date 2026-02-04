@@ -87,6 +87,7 @@ const cfg = {
   tankCapacityLiters: DEFAULT_TANK_CAPACITY_LITERS,
   avgConsumptionLPer100Km: DEFAULT_AVG_L_PER_100KM,
   geocodeUrl: process.env.GEOCODE_URL || "https://nominatim.openstreetmap.org/reverse",
+  geocodeConcurrency: Number(process.env.GEOCODE_CONCURRENCY || 4),
 };
 
 /* =======================
@@ -753,6 +754,25 @@ app.get("/api/fleet/status", async (_req, res) => {
 });
 
 const geocodeCache = new Map(); // key -> { value, expires }
+let geocodeActive = 0;
+const geocodeQueue = [];
+
+async function withGeocodeLimit(fn) {
+  if (!Number.isFinite(cfg.geocodeConcurrency) || cfg.geocodeConcurrency <= 0) {
+    return fn();
+  }
+  if (geocodeActive >= cfg.geocodeConcurrency) {
+    await new Promise((resolve) => geocodeQueue.push(resolve));
+  }
+  geocodeActive += 1;
+  try {
+    return await fn();
+  } finally {
+    geocodeActive -= 1;
+    const next = geocodeQueue.shift();
+    if (next) next();
+  }
+}
 
 function normalizeAddress(addr) {
   if (!addr) return null;
@@ -794,30 +814,33 @@ async function reverseGeocode(lat, lon) {
   if (cached && cached.expires > now) return cached.value;
 
   try {
-    const url = `${cfg.geocodeUrl}?format=jsonv2&lat=${lat}&lon=${lon}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 7000);
-    const r = await fetch(url, {
-      headers: {
-        "User-Agent": "QT-FleetControl/1.0 (fleet)",
-      },
-      signal: controller.signal,
+    return await withGeocodeLimit(async () => {
+      const url = `${cfg.geocodeUrl}?format=jsonv2&lat=${lat}&lon=${lon}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 7000);
+      const r = await fetch(url, {
+        headers: {
+          "User-Agent": "QT-FleetControl/1.0 (fleet)",
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!r.ok) throw new Error(`geocode_failed_${r.status}`);
+      const data = await r.json();
+      const addr = data.address || {};
+      const parts = [
+        addr.road || addr.pedestrian || addr.cycleway || addr.footway,
+        addr.house_number,
+        addr.postcode,
+        addr.city || addr.town || addr.village,
+      ].filter(Boolean);
+      const resolved = parts.length ? parts.join(", ") : data.display_name || null;
+      if (resolved) {
+        geocodeCache.set(key, { value: resolved, expires: now + 24 * 3600 * 1000 });
+        return resolved;
+      }
+      return null;
     });
-    clearTimeout(timer);
-    if (!r.ok) throw new Error(`geocode_failed_${r.status}`);
-    const data = await r.json();
-    const addr = data.address || {};
-    const parts = [
-      addr.road || addr.pedestrian || addr.cycleway || addr.footway,
-      addr.house_number,
-      addr.postcode,
-      addr.city || addr.town || addr.village,
-    ].filter(Boolean);
-    const resolved = parts.length ? parts.join(", ") : data.display_name || null;
-    if (resolved) {
-      geocodeCache.set(key, { value: resolved, expires: now + 24 * 3600 * 1000 });
-      return resolved;
-    }
   } catch (err) {
     console.error("reverse_geocode_failed", err);
   }
@@ -1205,7 +1228,7 @@ async function buildActivityReport(deviceId, month, opts = {}) {
   <div class="page-break"></div>
   <h2>Monatsübersicht – Tagesliste</h2>
   <div class="subtle">Start/Ende pro Tag</div>
-  <table>
+  <table class="bar-table">
     <thead>
       <tr>
         <th>Tag</th>
@@ -1298,6 +1321,10 @@ async function buildActivityReport(deviceId, month, opts = {}) {
            background-image: repeating-linear-gradient(to right, #e2e8f0 0, #e2e8f0 1px, transparent 1px, transparent 4.1667%); }
     .bar-scale { display:flex; justify-content:space-between; font-size:10px; color:#94a3b8; margin-top:4px; }
     .bar-col { width:100%; }
+    .bar-table { table-layout: fixed; }
+    .bar-table th:nth-child(1) { width:120px; }
+    .bar-table th:nth-child(3) { width:90px; }
+    .bar-table th:nth-child(4) { width:90px; }
     .bar-row td { vertical-align: middle; }
     .bar-seg { position:absolute; top:0; bottom:0; background:#2563eb; }
     .page-break { page-break-before: always; }
