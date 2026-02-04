@@ -67,6 +67,8 @@ const cfg = {
   detailMinSegmentSeconds: Number(process.env.DETAIL_MIN_SEGMENT_SECONDS || 180),
   detailMinSegmentDistanceM: Number(process.env.DETAIL_MIN_SEGMENT_DISTANCE_M || 200),
   detailMinStartEndDistanceM: Number(process.env.DETAIL_MIN_START_END_DISTANCE_M || 150),
+  detailMergeStopSeconds: Number(process.env.DETAIL_MERGE_STOP_SECONDS || 300),
+  pdfGeocode: String(process.env.PDF_GEOCODE || "").toLowerCase() === "true",
   distanceMaxSpeedKmh: Number(process.env.DIST_MAX_SPEED_KMH || 160),
 
   fuelKeys: Array.from(
@@ -822,11 +824,14 @@ async function reverseGeocode(lat, lon) {
   return null;
 }
 
-async function resolveAddress(addr, lat, lon) {
+async function resolveAddress(addr, lat, lon, opts = {}) {
+  const allowGeocode = opts.allowGeocode !== false;
   const normalized = normalizeAddress(addr);
   if (normalized) return normalized;
-  const geo = await reverseGeocode(lat, lon);
-  if (geo) return geo;
+  if (allowGeocode) {
+    const geo = await reverseGeocode(lat, lon);
+    if (geo) return geo;
+  }
   if (Number.isFinite(lat) && Number.isFinite(lon)) return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
   return "Adresse fehlt";
 }
@@ -866,7 +871,8 @@ async function buildActivityReport(deviceId, month, opts = {}) {
   const daysInMonth = end.subtract(1, "day").date();
   let totalSeconds = 0;
   let totalDistanceKm = 0;
-  let rowsHtml = "";
+  let barRowsHtml = "";
+  let dayListRowsHtml = "";
 
   const findNearestPosition = (dayRows, targetMs) => {
     if (!dayRows.length) return null;
@@ -956,12 +962,12 @@ async function buildActivityReport(deviceId, month, opts = {}) {
   };
 
   const addressCache = new Map();
-  const resolveAddressCached = async (addr, lat, lon) => {
+  const resolveAddressCached = async (addr, lat, lon, allowGeocode) => {
     const key = `${addr || ""}|${Number.isFinite(lat) ? lat.toFixed(5) : ""}|${
       Number.isFinite(lon) ? lon.toFixed(5) : ""
-    }`;
+    }|${allowGeocode ? "geo" : "nogeo"}`;
     if (addressCache.has(key)) return addressCache.get(key);
-    const value = await resolveAddress(addr, lat, lon);
+    const value = await resolveAddress(addr, lat, lon, { allowGeocode });
     addressCache.set(key, value);
     return value;
   };
@@ -1013,10 +1019,20 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       : null;
 
     const startAddress = startPos
-      ? await resolveAddressCached(startPos.address, startPos.latitude, startPos.longitude)
+      ? await resolveAddressCached(
+          startPos.address,
+          startPos.latitude,
+          startPos.longitude,
+          cfg.pdfGeocode
+        )
       : "-";
     const endAddress = endPos
-      ? await resolveAddressCached(endPos.address, endPos.latitude, endPos.longitude)
+      ? await resolveAddressCached(
+          endPos.address,
+          endPos.latitude,
+          endPos.longitude,
+          cfg.pdfGeocode
+        )
       : "-";
 
     // Distanz pro Tag (ungefähr, Haversine zwischen Positionspunkten)
@@ -1044,7 +1060,33 @@ async function buildActivityReport(deviceId, month, opts = {}) {
 
     if (opts.detail) {
       const dayStart = dayjs(day).startOf("day");
+      const mergedSegments = [];
       for (const seg of segments) {
+        if (!mergedSegments.length) {
+          mergedSegments.push({ ...seg });
+          continue;
+        }
+        const prev = mergedSegments[mergedSegments.length - 1];
+        const gapSec = Math.max(0, seg.start - prev.end);
+        if (gapSec <= cfg.detailMergeStopSeconds) {
+          const prevEnd = findNearestPosition(
+            dayRows,
+            dayStart.add(prev.end, "second").valueOf()
+          );
+          const curStart = findNearestPosition(
+            dayRows,
+            dayStart.add(seg.start, "second").valueOf()
+          );
+          const distM = distanceKm(prevEnd, curStart) * 1000;
+          if (distM < cfg.detailMinStartEndDistanceM) {
+            prev.end = seg.end;
+            continue;
+          }
+        }
+        mergedSegments.push({ ...seg });
+      }
+
+      for (const seg of mergedSegments) {
         const segStart = dayStart.add(seg.start, "second");
         const segEnd = dayStart.add(seg.end, "second");
         const segRows = rowsInRange(dayRows, segStart.valueOf(), segEnd.valueOf());
@@ -1078,7 +1120,8 @@ async function buildActivityReport(deviceId, month, opts = {}) {
                 await resolveAddressCached(
                   segStartPos.address,
                   segStartPos.latitude,
-                  segStartPos.longitude
+                  segStartPos.longitude,
+                  cfg.pdfGeocode
                 )
               )
             : "-",
@@ -1088,7 +1131,8 @@ async function buildActivityReport(deviceId, month, opts = {}) {
                 await resolveAddressCached(
                   segEndPos.address,
                   segEndPos.latitude,
-                  segEndPos.longitude
+                  segEndPos.longitude,
+                  cfg.pdfGeocode
                 )
               )
             : "-",
@@ -1097,24 +1141,63 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       }
     }
 
-    rowsHtml += `<tr>
+    barRowsHtml += `<tr>
       <td>${day}</td>
-      <td>${startTimeIso ? dayjs(startTimeIso).format("HH:mm") : "-"}</td>
-      <td>${startAddress}</td>
-      <td>${endTimeIso ? dayjs(endTimeIso).format("HH:mm") : "-"}</td>
-      <td>${endAddress}</td>
-      <td style="text-align:right; font-variant-numeric: tabular-nums;">${dayDistance.toFixed(1)} km</td>
       <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
+      <td style="text-align:right; font-variant-numeric: tabular-nums;">${dayDistance.toFixed(1)} km</td>
       <td>
         <div class="bar">
           ${timeline || ""}
         </div>
       </td>
     </tr>`;
+
+    dayListRowsHtml += `<tr>
+      <td>${day}</td>
+      <td>${startTimeIso ? dayjs(startTimeIso).format("HH:mm") : "-"}</td>
+      <td>${formatAddressForReport(startAddress)}</td>
+      <td>${endTimeIso ? dayjs(endTimeIso).format("HH:mm") : "-"}</td>
+      <td>${formatAddressForReport(endAddress)}</td>
+      <td style="text-align:right; font-variant-numeric: tabular-nums;">${dayDistance.toFixed(1)} km</td>
+      <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
+    </tr>`;
   }
 
   const totalHours = (totalSeconds / 3600).toFixed(2);
   const totalDistanceStr = totalDistanceKm.toFixed(1);
+
+  const dayListTable = `
+  <div class="page-break"></div>
+  <h2>Monatsübersicht – Tagesliste</h2>
+  <div class="subtle">Start/Ende pro Tag</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Tag</th>
+        <th>Start (Zeit)</th>
+        <th>Start (Ort)</th>
+        <th>Ende (Zeit)</th>
+        <th>Ende (Ort)</th>
+        <th class="right">Distanz (km)</th>
+        <th class="right">Aktive Zeit (h)</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${dayListRowsHtml}
+    </tbody>
+    <tfoot>
+      <tr>
+        <th>Summe</th>
+        <th></th>
+        <th></th>
+        <th></th>
+        <th></th>
+        <th class="right">${totalDistanceStr}</th>
+        <th class="right">${totalHours}</th>
+      </tr>
+    </tfoot>
+  </table>
+  `;
 
   const detailTable = !opts.detail || !segmentRows.length ? "" : `
   <div class="page-break"></div>
@@ -1219,31 +1302,25 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     </div>
   </div>
 
+  <h2>Monatsübersicht – Balken</h2>
+  <div class="subtle">Aktive Zeit pro Tag</div>
   <table>
     <thead>
       <tr>
         <th>Tag</th>
-        <th>Start (Zeit)</th>
-        <th>Start (Ort)</th>
-        <th>Ende (Zeit)</th>
-        <th>Ende (Ort)</th>
-        <th class="right">Distanz (km)</th>
         <th class="right">Aktive Zeit (h)</th>
+        <th class="right">Distanz (km)</th>
         <th>Balken</th>
       </tr>
     </thead>
     <tbody>
-      ${rowsHtml}
+      ${barRowsHtml}
     </tbody>
     <tfoot>
       <tr>
         <th>Summe</th>
-        <th></th>
-        <th></th>
-        <th></th>
-        <th></th>
-        <th class="right">${totalDistanceStr}</th>
         <th class="right">${totalHours}</th>
+        <th class="right">${totalDistanceStr}</th>
         <th></th>
       </tr>
     </tfoot>
@@ -1256,6 +1333,8 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     minBlock=${cfg.minMovingSeconds}s,
     minStop=${cfg.minStopSeconds}s
   </div>
+
+  ${dayListTable}
 
   ${detailTable}
 </body>
