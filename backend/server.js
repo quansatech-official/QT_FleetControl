@@ -943,6 +943,9 @@ async function buildActivityReport(deviceId, month, opts = {}) {
   };
 
   const segmentRows = [];
+  const dayEntries = [];
+  const detailEntries = [];
+  const addressPromises = [];
 
   const mergeSegments = (segments, gapSec) => {
     if (!segments.length) return [];
@@ -962,14 +965,14 @@ async function buildActivityReport(deviceId, month, opts = {}) {
   };
 
   const addressCache = new Map();
-  const resolveAddressCached = async (addr, lat, lon, allowGeocode) => {
+  const resolveAddressCached = (addr, lat, lon, allowGeocode) => {
     const key = `${addr || ""}|${Number.isFinite(lat) ? lat.toFixed(5) : ""}|${
       Number.isFinite(lon) ? lon.toFixed(5) : ""
     }|${allowGeocode ? "geo" : "nogeo"}`;
     if (addressCache.has(key)) return addressCache.get(key);
-    const value = await resolveAddress(addr, lat, lon, { allowGeocode });
-    addressCache.set(key, value);
-    return value;
+    const promise = resolveAddress(addr, lat, lon, { allowGeocode }).catch(() => "Adresse fehlt");
+    addressCache.set(key, promise);
+    return promise;
   };
 
   const formatAddressForReport = (addr) => {
@@ -1018,22 +1021,23 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       ? findNearestPosition(dayRows, dayjs(endTimeIso).valueOf())
       : null;
 
-    const startAddress = startPos
-      ? await resolveAddressCached(
+    const startAddrP = startPos
+      ? resolveAddressCached(
           startPos.address,
           startPos.latitude,
           startPos.longitude,
           cfg.pdfGeocode
         )
-      : "-";
-    const endAddress = endPos
-      ? await resolveAddressCached(
+      : Promise.resolve("-");
+    const endAddrP = endPos
+      ? resolveAddressCached(
           endPos.address,
           endPos.latitude,
           endPos.longitude,
           cfg.pdfGeocode
         )
-      : "-";
+      : Promise.resolve("-");
+    addressPromises.push(startAddrP, endAddrP);
 
     // Distanz pro Tag (ungefähr, Haversine zwischen Positionspunkten)
     // Filtert unrealistische GPS-Sprünge per Max-Geschwindigkeit.
@@ -1112,55 +1116,86 @@ async function buildActivityReport(deviceId, month, opts = {}) {
           continue;
         }
 
-        segmentRows.push({
+        const segStartAddrP = segStartPos
+          ? resolveAddressCached(
+              segStartPos.address,
+              segStartPos.latitude,
+              segStartPos.longitude,
+              cfg.pdfGeocode
+            )
+          : Promise.resolve("-");
+        const segEndAddrP = segEndPos
+          ? resolveAddressCached(
+              segEndPos.address,
+              segEndPos.latitude,
+              segEndPos.longitude,
+              cfg.pdfGeocode
+            )
+          : Promise.resolve("-");
+        addressPromises.push(segStartAddrP, segEndAddrP);
+
+        detailEntries.push({
           day,
           start: segStart.format("HH:mm"),
-          startAddr: segStartPos
-            ? formatAddressForReport(
-                await resolveAddressCached(
-                  segStartPos.address,
-                  segStartPos.latitude,
-                  segStartPos.longitude,
-                  cfg.pdfGeocode
-                )
-              )
-            : "-",
           end: segEnd.format("HH:mm"),
-          endAddr: segEndPos
-            ? formatAddressForReport(
-                await resolveAddressCached(
-                  segEndPos.address,
-                  segEndPos.latitude,
-                  segEndPos.longitude,
-                  cfg.pdfGeocode
-                )
-              )
-            : "-",
+          startAddrP: segStartAddrP,
+          endAddrP: segEndAddrP,
           duration: ((seg.end - seg.start) / 3600).toFixed(2),
         });
       }
     }
 
-    barRowsHtml += `<tr>
+    barRowsHtml += `<tr class="bar-row">
       <td>${day}</td>
-      <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
-      <td style="text-align:right; font-variant-numeric: tabular-nums;">${dayDistance.toFixed(1)} km</td>
       <td>
         <div class="bar">
           ${timeline || ""}
         </div>
       </td>
+      <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
+      <td style="text-align:right; font-variant-numeric: tabular-nums;">${dayDistance.toFixed(1)} km</td>
     </tr>`;
 
+    dayEntries.push({
+      day,
+      startTime: startTimeIso ? dayjs(startTimeIso).format("HH:mm") : "-",
+      endTime: endTimeIso ? dayjs(endTimeIso).format("HH:mm") : "-",
+      startAddrP,
+      endAddrP,
+      dayDistance,
+      hours
+    });
+  }
+
+  if (addressPromises.length) {
+    await Promise.all(addressPromises);
+  }
+
+  for (const e of dayEntries) {
+    const startAddr = formatAddressForReport(await e.startAddrP);
+    const endAddr = formatAddressForReport(await e.endAddrP);
     dayListRowsHtml += `<tr>
-      <td>${day}</td>
-      <td>${startTimeIso ? dayjs(startTimeIso).format("HH:mm") : "-"}</td>
-      <td>${formatAddressForReport(startAddress)}</td>
-      <td>${endTimeIso ? dayjs(endTimeIso).format("HH:mm") : "-"}</td>
-      <td>${formatAddressForReport(endAddress)}</td>
-      <td style="text-align:right; font-variant-numeric: tabular-nums;">${dayDistance.toFixed(1)} km</td>
-      <td style="text-align:right; font-variant-numeric: tabular-nums;">${hours}</td>
+      <td>${e.day}</td>
+      <td>${e.startTime}</td>
+      <td>${startAddr}</td>
+      <td>${e.endTime}</td>
+      <td>${endAddr}</td>
+      <td style="text-align:right; font-variant-numeric: tabular-nums;">${e.dayDistance.toFixed(1)} km</td>
+      <td style="text-align:right; font-variant-numeric: tabular-nums;">${e.hours}</td>
     </tr>`;
+  }
+
+  for (const e of detailEntries) {
+    const startAddr = formatAddressForReport(await e.startAddrP);
+    const endAddr = formatAddressForReport(await e.endAddrP);
+    segmentRows.push({
+      day: e.day,
+      start: e.start,
+      end: e.end,
+      startAddr,
+      endAddr,
+      duration: e.duration
+    });
   }
 
   const totalHours = (totalSeconds / 3600).toFixed(2);
@@ -1261,6 +1296,9 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     .subtle { color:#64748b; margin-bottom:6px; font-size:11px; }
     .bar { position:relative; height:18px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden;
            background-image: repeating-linear-gradient(to right, #e2e8f0 0, #e2e8f0 1px, transparent 1px, transparent 4.1667%); }
+    .bar-scale { display:flex; justify-content:space-between; font-size:10px; color:#94a3b8; margin-top:4px; }
+    .bar-col { width:100%; }
+    .bar-row td { vertical-align: middle; }
     .bar-seg { position:absolute; top:0; bottom:0; background:#2563eb; }
     .page-break { page-break-before: always; }
     .detail-table { table-layout: auto; }
@@ -1303,14 +1341,28 @@ async function buildActivityReport(deviceId, month, opts = {}) {
   </div>
 
   <h2>Monatsübersicht – Balken</h2>
-  <div class="subtle">Aktive Zeit pro Tag</div>
+  <div class="subtle">Aktive Zeit pro Tag (Zeitskala 0–24h)</div>
   <table>
     <thead>
       <tr>
         <th>Tag</th>
-        <th class="right">Aktive Zeit (h)</th>
-        <th class="right">Distanz (km)</th>
-        <th>Balken</th>
+        <th class="bar-col">Balken</th>
+        <th class="right">Zeit (h)</th>
+        <th class="right">Km</th>
+      </tr>
+      <tr>
+        <th></th>
+        <th>
+          <div class="bar-scale">
+            <span>0</span>
+            <span>6</span>
+            <span>12</span>
+            <span>18</span>
+            <span>24</span>
+          </div>
+        </th>
+        <th></th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -1319,6 +1371,7 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     <tfoot>
       <tr>
         <th>Summe</th>
+        <th></th>
         <th class="right">${totalHours}</th>
         <th class="right">${totalDistanceStr}</th>
         <th></th>
