@@ -1416,14 +1416,14 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     th { background:#f8fafc; text-align:left; }
     .right { text-align:right; }
     .subtle { color:#64748b; margin-bottom:6px; font-size:11px; }
-    .bar { position:relative; height:18px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden;
+    .bar { position:relative; height:14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden;
            background-image: repeating-linear-gradient(to right, #e2e8f0 0, #e2e8f0 1px, transparent 1px, transparent 4.1667%); }
     .bar-scale { display:flex; justify-content:space-between; font-size:10px; color:#94a3b8; margin-top:4px; }
     .bar-col { width:100%; }
     .bar-table { table-layout: fixed; }
-    .bar-table th:nth-child(1) { width:120px; }
+    .bar-table th:nth-child(1) { width:140px; }
     .bar-table th:nth-child(3) { width:90px; }
-    .bar-table th:nth-child(4) { width:90px; }
+    .bar-table th:nth-child(4) { width:110px; }
     .bar-row td { vertical-align: middle; }
     .bar-seg { position:absolute; top:0; bottom:0; background:#2563eb; }
     .page-break { page-break-before: always; }
