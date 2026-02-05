@@ -1402,20 +1402,22 @@ async function buildActivityReport(deviceId, month, opts = {}) {
 <head>
   <meta charset="utf-8"/>
   <style>
-    body { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 12px; color:#0f172a; }
-    h1 { font-size: 20px; margin: 0 0 6px; }
-    h2 { font-size: 16px; margin: 0 0 6px; }
-    .meta { margin-bottom: 10px; }
+    @page { margin: 12mm 10mm; }
+    body { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 12px; color:#0f172a; margin:0; }
+    h1 { font-size: 18px; margin: 0 0 4px; font-weight:700; }
+    h2 { font-size: 14px; margin: 0 0 4px; }
+    .meta { margin-bottom: 8px; }
+    .header { padding-bottom:6px; margin-bottom:8px; border-bottom:1px solid #e2e8f0; }
     .badge { display:inline-block; padding:4px 10px; border:1px solid #e2e8f0; border-radius:999px; margin-right:6px; background:#f8fafc; }
-    .summary { display:flex; gap:10px; margin:10px 0 12px; }
+    .summary { display:flex; gap:10px; margin:8px 0 10px; }
     .card { border:1px solid #e2e8f0; border-radius:10px; padding:8px 10px; background:#fff; min-width:140px; }
     .card .label { color:#64748b; font-size:11px; }
     .card .value { font-size:16px; font-weight:700; margin-top:2px; }
     table { width:100%; border-collapse: collapse; }
-    th, td { border-bottom:1px solid #e5e7eb; padding:6px 6px; vertical-align:middle; }
+    th, td { border-bottom:1px solid #e5e7eb; padding:5px 6px; vertical-align:middle; }
     th { background:#f8fafc; text-align:left; }
     .right { text-align:right; }
-    .subtle { color:#64748b; margin-bottom:6px; font-size:11px; }
+    .subtle { color:#64748b; margin-bottom:4px; font-size:11px; }
     .bar { position:relative; height:14px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden;
            background-image: repeating-linear-gradient(to right, #e2e8f0 0, #e2e8f0 1px, transparent 1px, transparent 4.1667%); }
     .bar-scale { display:flex; justify-content:space-between; font-size:10px; color:#94a3b8; margin-top:4px; }
@@ -1426,7 +1428,7 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     .bar-table th:nth-child(4) { width:110px; }
     .bar-row td { vertical-align: middle; }
     .bar-seg { position:absolute; top:0; bottom:0; background:#2563eb; }
-    .page-break { page-break-before: always; }
+    .page-break { page-break-before: always; margin-top:8px; }
     .detail-table { table-layout: fixed; }
     .detail-table th, .detail-table td { padding:5px 6px; }
     .detail-table th:nth-child(1) { width:90px; }
@@ -1445,11 +1447,13 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       border-top:1px solid #c7d2fe;
     }
     .row-alt { background:#f8fafc; }
-    .footer { margin-top:12px; color:#64748b; font-size:10px; }
+    .footer { margin-top:10px; color:#64748b; font-size:10px; }
   </style>
 </head>
 <body>
-  <h1>QT FleetControl – Fahrtenbuch Monatsreport</h1>
+  <div class="header">
+    <h1>QT FleetControl – Fahrtenbuch Monatsreport</h1>
+  </div>
   <div class="meta">
     <span class="badge">Fahrzeug: ${device?.name || deviceId}</span>
     <span class="badge">Monat: ${month}</span>
