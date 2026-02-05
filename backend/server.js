@@ -1176,13 +1176,9 @@ async function buildActivityReport(deviceId, month, opts = {}) {
           if (speedKmh > cfg.distanceMaxSpeedKmh) continue;
           segDistanceKm += deltaKm;
         }
-        if (segDistanceKm * 1000 < cfg.detailMinSegmentDistanceM) continue;
-
         const segStartPos = segRows[0];
         const segEndPos = segRows[segRows.length - 1];
-        if (distanceKm(segStartPos, segEndPos) * 1000 < cfg.detailMinStartEndDistanceM) {
-          continue;
-        }
+        const startEndDistM = distanceKm(segStartPos, segEndPos) * 1000;
 
         const segStartAddrP = segStartPos
           ? resolveAddressCached(
@@ -1215,6 +1211,8 @@ async function buildActivityReport(deviceId, month, opts = {}) {
           endLat: segEndPos?.latitude,
           endLon: segEndPos?.longitude,
           durationSec: seg.end - seg.start,
+          distanceKm: segDistanceKm,
+          isShort: segDistanceKm * 1000 < cfg.detailMinSegmentDistanceM || startEndDistM < cfg.detailMinStartEndDistanceM,
         });
       }
     }
@@ -1262,27 +1260,15 @@ async function buildActivityReport(deviceId, month, opts = {}) {
   for (const e of detailEntries) {
     const startAddr = formatAddressForReport(await e.startAddrP);
     const endAddr = formatAddressForReport(await e.endAddrP);
-    if (startAddr && endAddr && startAddr === endAddr) continue;
-    if (
-      Number.isFinite(e.startLat) &&
-      Number.isFinite(e.startLon) &&
-      Number.isFinite(e.endLat) &&
-      Number.isFinite(e.endLon)
-    ) {
-      const distM =
-        distanceKm(
-          { latitude: e.startLat, longitude: e.startLon },
-          { latitude: e.endLat, longitude: e.endLon }
-        ) * 1000;
-      if (distM < cfg.detailMinStartEndDistanceM) continue;
-    }
     segmentRows.push({
       day: e.day,
       start: e.start,
       end: e.end,
       startAddr,
       endAddr,
-      duration: formatDurationHhmm(e.durationSec),
+      durationSec: e.durationSec,
+      distanceKm: e.distanceKm,
+      isShort: e.isShort,
       startTs: e.startTs,
       endTs: e.endTs,
       startLat: e.startLat,
@@ -1307,17 +1293,26 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       { latitude: row.startLat, longitude: row.startLon }
     ) * 1000;
 
-    if (sameDay && gapSec <= cfg.detailMergeStopSeconds && (sameAddresses || distM < cfg.detailMinStartEndDistanceM)) {
+    if (
+      sameDay &&
+      gapSec <= cfg.detailMergeStopSeconds &&
+      (sameAddresses || distM < cfg.detailMinStartEndDistanceM || (prev.isShort && row.isShort))
+    ) {
       prev.end = row.end;
       prev.endAddr = row.endAddr;
       prev.endTs = row.endTs;
       prev.endLat = row.endLat;
       prev.endLon = row.endLon;
-      const durationSec = Math.max(0, (prev.endTs - prev.startTs) / 1000);
-      prev.duration = formatDurationHhmm(durationSec);
+      prev.durationSec = Math.max(0, prev.durationSec + row.durationSec);
+      prev.distanceKm = (prev.distanceKm || 0) + (row.distanceKm || 0);
+      prev.isShort = prev.isShort && row.isShort;
       continue;
     }
     mergedSegmentRows.push({ ...row });
+  }
+
+  for (const row of mergedSegmentRows) {
+    row.duration = formatDurationHhmm(row.durationSec);
   }
 
   const totalHours = (totalSeconds / 3600).toFixed(2);
@@ -1368,7 +1363,7 @@ async function buildActivityReport(deviceId, month, opts = {}) {
         <th>Start-Ort</th>
         <th>Ende</th>
         <th>Ende-Ort</th>
-        <th class="right">Dauer (h)</th>
+        <th class="right">Dauer</th>
       </tr>
     </thead>
     <tbody>

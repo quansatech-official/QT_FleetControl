@@ -172,7 +172,7 @@ VITE_AUTH_DISABLED=true
 - `DETAIL_GAP_SECONDS`: Detail report: merge gaps shorter than this.
 - `DETAIL_STOP_SECONDS`: Detail report: stop threshold for blocks.
 - `DETAIL_MIN_SEGMENT_SECONDS`: Detail report: drop segments shorter than this.
-- `DETAIL_MIN_SEGMENT_DISTANCE_M`: Detail report: drop segments shorter than this distance (default `1000`).
+- `DETAIL_MIN_SEGMENT_DISTANCE_M`: Detail report: consecutive trips shorter than this distance are merged (default `1000`).
 - `DETAIL_MIN_START_END_DISTANCE_M`: Detail report: drop segments with too-small start/end distance.
 - `DETAIL_MERGE_STOP_SECONDS`: Detail report: merge short gaps if same/nearby locations.
 - `DIST_MAX_SPEED_KMH`: Max speed cap for distance calculation (ignore GPS jumps).
@@ -194,3 +194,24 @@ VITE_AUTH_DISABLED=true
 - `GEOCODE_FORMAT`: `format` query param value (e.g., `json` or `jsonv2`).
 - `GEOCODE_EXTRA_PARAMS`: Extra query params (URL-encoded, e.g., `zoom=18&addressdetails=1`).
 - `GEOCODE_CONCURRENCY`: Max concurrent reverse-geocode requests.
+
+## 🗺️ Self-hosted Nominatim (AT)
+
+This repo includes an optional Nominatim service (Austria extract) in `docker-compose.yml`.
+It will download and import the Austria PBF on first start and then apply daily updates.
+
+**Enable in `.env`:**
+```env
+PDF_GEOCODE=true
+GEOCODE_URL=http://nominatim:8080/reverse
+GEOCODE_CONCURRENCY=2
+```
+
+**Start services:**
+```bash
+docker compose up -d nominatim qt-api qt-frontend
+```
+
+Notes:
+- First import can take a long time depending on your hardware.
+- The Nominatim HTTP port is mapped to `8085` on the host.
