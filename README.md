@@ -138,3 +138,59 @@ TRACCAR_BASE_URL=http://traccar:8082
 TRACCAR_AUTH_MODE=api
 AUTH_DISABLED=true
 VITE_AUTH_DISABLED=true
+```
+
+### Environment Variables (Detailed)
+
+**Database / Traccar**
+- `DB_HOST`: Traccar MySQL host.
+- `DB_PORT`: Traccar MySQL port.
+- `DB_NAME`: Traccar database name.
+- `DB_USER`: Read-only DB user.
+- `DB_PASS`: Read-only DB password.
+
+**Auth**
+- `JWT_SECRET`: Secret for JWT signing.
+- `JWT_EXPIRES_IN`: Token lifetime (e.g., `12h`).
+- `TRACCAR_BASE_URL`: Traccar base URL (required for API auth mode).
+- `TRACCAR_AUTH_MODE`: `api` or `db`.
+- `AUTH_DISABLED`: `true` to disable backend auth (dev only).
+- `VITE_AUTH_DISABLED`: `true` to disable frontend auth (dev only).
+
+**Frontend**
+- `PORT`: Backend port.
+- `VITE_API_BASE`: Backend API base URL for the frontend.
+
+**Activity / Driving Logic**
+- `MIN_SPEED_KMH`: Speed threshold to consider moving.
+- `STOP_TOLERANCE_SEC`: Short dips below threshold tolerated.
+- `MIN_MOVING_SECONDS`: Minimum duration for a movement block.
+- `MIN_STOP_SECONDS`: Gap/idle duration that ends a block.
+- `DASHBOARD_STOP_TOLERANCE_SEC`: Dashboard-specific tolerance for brief stops.
+- `DASHBOARD_MIN_MOVING_SECONDS`: Dashboard-specific minimum block length.
+- `DASHBOARD_MIN_STOP_SECONDS`: Dashboard-specific stop duration.
+- `DETAIL_GAP_SECONDS`: Detail report: merge gaps shorter than this.
+- `DETAIL_STOP_SECONDS`: Detail report: stop threshold for blocks.
+- `DETAIL_MIN_SEGMENT_SECONDS`: Detail report: drop segments shorter than this.
+- `DETAIL_MIN_SEGMENT_DISTANCE_M`: Detail report: drop segments shorter than this distance (default `1000`).
+- `DETAIL_MIN_START_END_DISTANCE_M`: Detail report: drop segments with too-small start/end distance.
+- `DETAIL_MERGE_STOP_SECONDS`: Detail report: merge short gaps if same/nearby locations.
+- `DIST_MAX_SPEED_KMH`: Max speed cap for distance calculation (ignore GPS jumps).
+
+**Fuel**
+- `FUEL_JSON_KEY`: Comma-separated list of fuel keys (e.g., `fuel,io48`).
+- `FUEL_DROP_LITERS`: Absolute drop threshold.
+- `FUEL_DROP_PERCENT`: Percent drop threshold.
+- `FUEL_WINDOW_MINUTES`: Window for detecting drops.
+- `FUEL_REFUEL_LITERS`: Absolute refill threshold.
+- `FUEL_REFUEL_PERCENT`: Percent refill threshold.
+
+**Geocoding (PDF)**
+- `PDF_GEOCODE`: `true` to reverse-geocode addresses in PDF.
+- `GEOCODE_PROVIDER`: Optional provider switch. Supported: `mapsco` or empty (default Nominatim).
+- `GEOCODE_URL`: Override reverse-geocode endpoint URL.
+- `GEOCODE_API_KEY`: API key for provider (if required).
+- `GEOCODE_API_KEY_PARAM`: Query param name for API key (e.g., `api_key`).
+- `GEOCODE_FORMAT`: `format` query param value (e.g., `json` or `jsonv2`).
+- `GEOCODE_EXTRA_PARAMS`: Extra query params (URL-encoded, e.g., `zoom=18&addressdetails=1`).
+- `GEOCODE_CONCURRENCY`: Max concurrent reverse-geocode requests.

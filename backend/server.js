@@ -65,10 +65,14 @@ const cfg = {
   dashboardStopToleranceSec: Number(process.env.DASHBOARD_STOP_TOLERANCE_SEC || 60),
   dashboardMinMovingSeconds: Number(process.env.DASHBOARD_MIN_MOVING_SECONDS || 30),
   dashboardMinStopSeconds: Number(process.env.DASHBOARD_MIN_STOP_SECONDS || 180),
+  geocodeApiKey: process.env.GEOCODE_API_KEY || "",
+  geocodeApiKeyParam: process.env.GEOCODE_API_KEY_PARAM || "",
+  geocodeFormat: process.env.GEOCODE_FORMAT || "jsonv2",
+  geocodeExtraParams: process.env.GEOCODE_EXTRA_PARAMS || "",
   detailGapSeconds: Number(process.env.DETAIL_GAP_SECONDS || 600), // Segmente enger als dieser Wert werden im Detailreport zusammengelegt
   detailStopSeconds: Number(process.env.DETAIL_STOP_SECONDS || process.env.MIN_STOP_SECONDS || 600),
   detailMinSegmentSeconds: Number(process.env.DETAIL_MIN_SEGMENT_SECONDS || 180),
-  detailMinSegmentDistanceM: Number(process.env.DETAIL_MIN_SEGMENT_DISTANCE_M || 200),
+  detailMinSegmentDistanceM: Number(process.env.DETAIL_MIN_SEGMENT_DISTANCE_M || 1000),
   detailMinStartEndDistanceM: Number(process.env.DETAIL_MIN_START_END_DISTANCE_M || 150),
   detailMergeStopSeconds: Number(process.env.DETAIL_MERGE_STOP_SECONDS || 300),
   pdfGeocode: String(process.env.PDF_GEOCODE || "").toLowerCase() === "true",
@@ -92,6 +96,19 @@ const cfg = {
   geocodeUrl: process.env.GEOCODE_URL || "https://nominatim.openstreetmap.org/reverse",
   geocodeConcurrency: Number(process.env.GEOCODE_CONCURRENCY || 4),
 };
+
+const geocodeProvider = String(process.env.GEOCODE_PROVIDER || "").toLowerCase();
+if (geocodeProvider === "mapsco") {
+  if (!process.env.GEOCODE_URL) {
+    cfg.geocodeUrl = "https://geocode.maps.co/reverse";
+  }
+  if (!process.env.GEOCODE_API_KEY_PARAM) {
+    cfg.geocodeApiKeyParam = "api_key";
+  }
+  if (!process.env.GEOCODE_FORMAT) {
+    cfg.geocodeFormat = "json";
+  }
+}
 
 /* =======================
    Auth (Traccar)
@@ -824,10 +841,21 @@ async function reverseGeocode(lat, lon) {
 
   try {
     return await withGeocodeLimit(async () => {
-      const url = `${cfg.geocodeUrl}?format=jsonv2&lat=${lat}&lon=${lon}`;
+      const url = new URL(cfg.geocodeUrl);
+      if (cfg.geocodeFormat) url.searchParams.set("format", cfg.geocodeFormat);
+      url.searchParams.set("lat", String(lat));
+      url.searchParams.set("lon", String(lon));
+      if (cfg.geocodeApiKey && cfg.geocodeApiKeyParam) {
+        url.searchParams.set(cfg.geocodeApiKeyParam, cfg.geocodeApiKey);
+      }
+      if (cfg.geocodeExtraParams) {
+        for (const [k, v] of new URLSearchParams(cfg.geocodeExtraParams)) {
+          url.searchParams.set(k, v);
+        }
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 7000);
-      const r = await fetch(url, {
+      const r = await fetch(url.toString(), {
         headers: {
           "User-Agent": "QT-FleetControl/1.0 (fleet)",
         },
@@ -1021,11 +1049,19 @@ async function buildActivityReport(deviceId, month, opts = {}) {
     return short.replace(/, /g, ", <wbr>");
   };
 
+  const formatDurationHhmm = (seconds) => {
+    if (!Number.isFinite(seconds) || seconds < 0) return "-";
+    const totalMinutes = Math.round(seconds / 60);
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  };
+
   for (let d = 1; d <= daysInMonth; d++) {
     const day = start.date(d).format("YYYY-MM-DD");
     const sec = secondsByDay.get(day) || 0;
     totalSeconds += sec;
-    const hours = (sec / 3600).toFixed(2);
+    const hours = formatDurationHhmm(sec);
     const width = Math.min(100, (sec / 86400) * 100);
 
     const dayRows = dayRowsMap.get(day) || [];
@@ -1178,7 +1214,7 @@ async function buildActivityReport(deviceId, month, opts = {}) {
           startLon: segStartPos?.longitude,
           endLat: segEndPos?.latitude,
           endLon: segEndPos?.longitude,
-          duration: ((seg.end - seg.start) / 3600).toFixed(2),
+          durationSec: seg.end - seg.start,
         });
       }
     }
@@ -1226,13 +1262,27 @@ async function buildActivityReport(deviceId, month, opts = {}) {
   for (const e of detailEntries) {
     const startAddr = formatAddressForReport(await e.startAddrP);
     const endAddr = formatAddressForReport(await e.endAddrP);
+    if (startAddr && endAddr && startAddr === endAddr) continue;
+    if (
+      Number.isFinite(e.startLat) &&
+      Number.isFinite(e.startLon) &&
+      Number.isFinite(e.endLat) &&
+      Number.isFinite(e.endLon)
+    ) {
+      const distM =
+        distanceKm(
+          { latitude: e.startLat, longitude: e.startLon },
+          { latitude: e.endLat, longitude: e.endLon }
+        ) * 1000;
+      if (distM < cfg.detailMinStartEndDistanceM) continue;
+    }
     segmentRows.push({
       day: e.day,
       start: e.start,
       end: e.end,
       startAddr,
       endAddr,
-      duration: e.duration,
+      duration: formatDurationHhmm(e.durationSec),
       startTs: e.startTs,
       endTs: e.endTs,
       startLat: e.startLat,
@@ -1263,8 +1313,8 @@ async function buildActivityReport(deviceId, month, opts = {}) {
       prev.endTs = row.endTs;
       prev.endLat = row.endLat;
       prev.endLon = row.endLon;
-      const durationHours = (prev.endTs - prev.startTs) / 3600000;
-      prev.duration = durationHours.toFixed(2);
+      const durationSec = Math.max(0, (prev.endTs - prev.startTs) / 1000);
+      prev.duration = formatDurationHhmm(durationSec);
       continue;
     }
     mergedSegmentRows.push({ ...row });
