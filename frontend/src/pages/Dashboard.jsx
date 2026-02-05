@@ -134,13 +134,6 @@ export default function Dashboard() {
   /* =====================
      PDF URL
      ===================== */
-  const pdfUrl = useMemo(() => {
-    if (!deviceId) return "#";
-    return withAuthToken(
-      `${API_BASE}/reports/activity.pdf?deviceId=${deviceId}&month=${month}`
-    );
-  }, [deviceId, month]);
-
   const pdfDetailUrl = useMemo(() => {
     if (!deviceId) return "#";
     return withAuthToken(
@@ -148,7 +141,7 @@ export default function Dashboard() {
     );
   }, [deviceId, month]);
 
-  const handleZipExport = async (detail = false) => {
+  const handleZipExport = async () => {
     if (!exportSelection.length) {
       setExportError("Bitte mindestens ein Fahrzeug wählen.");
       return;
@@ -159,7 +152,7 @@ export default function Dashboard() {
       const token = getToken();
       const params = new URLSearchParams({ month });
       params.set("deviceIds", exportSelection.join(","));
-      if (detail) params.set("detail", "1");
+      params.set("detail", "1");
       const resp = await fetch(`${API_BASE}/reports/activity.zip?${params.toString()}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined
       });
@@ -248,11 +241,8 @@ export default function Dashboard() {
         {/* Export-Buttons */}
         {mode === "controlling" && (
           <>
-            <a href={pdfUrl} target="_blank" rel="noreferrer">
-              <button>PDF Fahrtenbuch (kurz)</button>
-            </a>
             <a href={pdfDetailUrl} target="_blank" rel="noreferrer">
-              <button>PDF Fahrtenbuch Detail</button>
+              <button>PDF Fahrtenbuch</button>
             </a>
           </>
         )}
@@ -552,8 +542,6 @@ function ExportView({
   exportError,
   onExport
 }) {
-  const [detail, setDetail] = useState(false);
-
   const fleetDevices = useMemo(() => {
     const activityMap = new Map();
     (fleetActivity?.devices || []).forEach((d) => activityMap.set(d.deviceId, d));
@@ -618,15 +606,7 @@ function ExportView({
           {!fleetDevices.length && <div style={{ color: "#666", fontSize: 12 }}>Keine Fahrzeuge</div>}
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#475569" }}>
-            <input
-              type="checkbox"
-              checked={detail}
-              onChange={(e) => setDetail(e.target.checked)}
-            />
-            Detail (Fahrtenliste) in ZIP (beinhaltet zusätzliche Tabelle pro Tag/Fahrt)
-          </label>
-          <button onClick={() => onExport(detail)} disabled={exporting}>
+          <button onClick={() => onExport()} disabled={exporting}>
             {exporting ? "Export läuft…" : "ZIP exportieren"}
           </button>
           {exportError && <span style={{ color: "#b91c1c", fontSize: 13 }}>{exportError}</span>}

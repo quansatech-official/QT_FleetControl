@@ -62,6 +62,9 @@ const cfg = {
   stopToleranceSec: Number(process.env.STOP_TOLERANCE_SEC || 120),
   minMovingSeconds: Number(process.env.MIN_MOVING_SECONDS || 60),
   minStopSeconds: Number(process.env.MIN_STOP_SECONDS || 600),
+  dashboardStopToleranceSec: Number(process.env.DASHBOARD_STOP_TOLERANCE_SEC || 60),
+  dashboardMinMovingSeconds: Number(process.env.DASHBOARD_MIN_MOVING_SECONDS || 30),
+  dashboardMinStopSeconds: Number(process.env.DASHBOARD_MIN_STOP_SECONDS || 180),
   detailGapSeconds: Number(process.env.DETAIL_GAP_SECONDS || 600), // Segmente enger als dieser Wert werden im Detailreport zusammengelegt
   detailStopSeconds: Number(process.env.DETAIL_STOP_SECONDS || process.env.MIN_STOP_SECONDS || 600),
   detailMinSegmentSeconds: Number(process.env.DETAIL_MIN_SEGMENT_SECONDS || 180),
@@ -349,7 +352,13 @@ app.get("/api/activity/month", async (req, res) => {
       [deviceId, start.toDate(), end.toDate()]
     );
 
-    const { secondsByDay, segmentsByDay } = computeDailyActivity(rows, cfg);
+    const dashboardCfg = {
+      ...cfg,
+      stopToleranceSec: cfg.dashboardStopToleranceSec,
+      minMovingSeconds: cfg.dashboardMinMovingSeconds,
+      minStopSeconds: cfg.dashboardMinStopSeconds
+    };
+    const { secondsByDay, segmentsByDay } = computeDailyActivity(rows, dashboardCfg);
 
     // Alle Tage des Monats auffüllen
     const daysInMonth = end.subtract(1, "day").date();
